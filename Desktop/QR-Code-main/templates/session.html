@@ -1,0 +1,138 @@
+{% extends 'base.html' %}
+
+{% block title %}Live Session #{{ current_session.id }} - QR Attendance{% endblock %}
+
+{% block content %}
+<div class="container container-wide">
+
+  <!-- Top bar with Back Button & Session Meta -->
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+    <div style="display: flex; align-items: center; gap: 1rem;">
+      <a href="{{ url_for('dashboard') }}" class="btn btn-secondary btn-sm">
+        <i class="fa-solid fa-arrow-left"></i> Dashboard
+      </a>
+      <div>
+        <h1 style="font-size: 1.6rem; font-weight: 800; color: #ffffff; letter-spacing: -0.02em;">
+          Live Session #{{ current_session.id }}
+        </h1>
+        <span style="font-size: 0.85rem; color: var(--text-muted);">
+          Created: {{ current_session.created_at }} &bull; Valid for 10 minutes
+        </span>
+      </div>
+    </div>
+
+    <div style="display: flex; gap: 0.75rem;">
+      <a href="{{ url_for('export_session', session_id=current_session.id) }}" class="btn btn-secondary btn-sm">
+        <i class="fa-solid fa-file-arrow-down"></i> Export CSV
+      </a>
+      <a href="{{ url_for('reports') }}" class="btn btn-secondary btn-sm">
+        <i class="fa-solid fa-clipboard-list"></i> Full Report
+      </a>
+    </div>
+  </div>
+
+  <div class="qr-layout">
+
+    <!-- QR Code Presentation Card -->
+    <div class="card" style="display: flex; flex-direction: column; align-items: center; text-align: center;">
+      
+      <div style="display: flex; justify-content: space-between; width: 100%; align-items: center; margin-bottom: 1.25rem;">
+        {% if is_expired %}
+          <span class="badge badge-expired"><i class="fa-solid fa-clock"></i> SESSION EXPIRED</span>
+        {% else %}
+          <div class="qr-pulse-badge">
+            <div class="pulse-dot"></div>
+            <span>LIVE SCANNING ACTIVE</span>
+          </div>
+        {% endif %}
+
+        <span id="session-timer" class="badge {{ 'badge-expired' if is_expired else 'badge-active' }}" style="font-size: 0.9rem; padding: 0.35rem 0.85rem;">
+          {{ 'EXPIRED' if is_expired else '' }}
+        </span>
+      </div>
+
+      <!-- QR Display Box -->
+      <div class="qr-box-container" style="width: 100%; max-width: 380px;">
+        <img src="data:image/png;base64,{{ qr_code }}" alt="Attendance QR Code" class="qr-image">
+        <p style="margin-top: 1rem; color: #475569; font-weight: 600; font-size: 0.9rem;">
+          <i class="fa-solid fa-camera"></i> Scan with phone camera or QR scanner
+        </p>
+      </div>
+
+      <!-- Scan Link & Local Testing Helper -->
+      <div style="width: 100%; margin-top: 1.5rem;">
+        <div class="form-label" style="text-align: left; margin-bottom: 0.4rem;">
+          <i class="fa-solid fa-link"></i> Direct Scan URL:
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+          <input type="text" readonly value="{{ scan_url }}" id="scan-url-input" class="form-control" style="font-family: var(--font-mono); font-size: 0.82rem; background: rgba(0, 0, 0, 0.4);">
+          <button type="button" class="btn btn-secondary" onclick="copyToClipboard('{{ scan_url }}', this)" title="Copy Link">
+            <i class="fa-solid fa-copy"></i>
+          </button>
+        </div>
+
+        <div style="margin-top: 0.85rem; display: flex; justify-content: space-between; align-items: center; font-size: 0.82rem; color: var(--text-dim);">
+          <span>Testing locally?</span>
+          <a href="{{ local_scan_url }}" target="_blank" style="color: var(--secondary); text-decoration: none; font-weight: 600;">
+            <i class="fa-solid fa-arrow-up-right-from-square"></i> Open Attendance Form in New Tab
+          </a>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Real-time Attendance Feed Card -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <i class="fa-solid fa-users" style="color: var(--secondary);"></i>
+          <span>Live Attendance (<span id="live-count" style="color: var(--primary);">{{ count }}</span>)</span>
+        </div>
+        <span style="font-size: 0.8rem; color: var(--text-dim);">
+          <i class="fa-solid fa-arrows-rotate fa-spin" style="margin-right: 0.3rem;"></i> Auto-syncing
+        </span>
+      </div>
+
+      <!-- Live Attendee Feed -->
+      <div style="min-height: 280px;">
+        <div id="empty-attendees" style="text-align: center; padding: 3rem 1rem; {{ 'display: none;' if attendees else '' }}">
+          <div style="font-size: 2.5rem; color: var(--text-dim); margin-bottom: 0.75rem;">
+            <i class="fa-solid fa-hourglass-start"></i>
+          </div>
+          <h4 style="color: #ffffff; font-weight: 600;">Waiting for Scans...</h4>
+          <p style="color: var(--text-muted); font-size: 0.88rem; margin-top: 0.25rem;">
+            Students who scan the QR code will appear here in real-time.
+          </p>
+        </div>
+
+        <ul id="attendee-list" class="attendee-list">
+          {% for student in attendees %}
+            <li class="attendee-item">
+              <div style="display: flex; align-items: center; gap: 0.75rem;">
+                <div class="attendee-avatar">{{ student.student_id[0] | upper }}</div>
+                <div>
+                  <div style="font-weight: 600; color: #ffffff;">{{ student.student_id }}</div>
+                  <div style="font-size: 0.75rem; color: #64748b;">{{ student.timestamp }}</div>
+                </div>
+              </div>
+              <span class="badge badge-active">Verified</span>
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+
+    </div>
+
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Initialize live real-time synchronization
+  document.addEventListener('DOMContentLoaded', () => {
+    initLiveSession({{ current_session.id }}, {{ remaining_seconds }});
+  });
+</script>
+{% endblock %}

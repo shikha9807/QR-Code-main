@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}QR Attendance System{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+  <!-- Navbar -->
+  <nav class="navbar">
+    <a href="{{ url_for('dashboard') if session.get('user_id') else url_for('login') }}" class="nav-brand">
+      <div class="brand-badge"><i class="fa-solid fa-qrcode"></i></div>
+      <span>QR Attendance</span>
+    </a>
+
+    <div class="nav-links">
+      {% if session.get('user_id') %}
+        <a href="{{ url_for('dashboard') }}" class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}">
+          <i class="fa-solid fa-gauge-high"></i> Dashboard
+        </a>
+        <a href="{{ url_for('reports') }}" class="nav-link {% if request.endpoint == 'reports' %}active{% endif %}">
+          <i class="fa-solid fa-chart-pie"></i> Reports
+        </a>
+        {% if session.get('role') == 'admin' %}
+        <a href="{{ url_for('admin_dashboard') }}" class="nav-link {% if request.endpoint == 'admin_dashboard' or 'admin_' in request.endpoint %}active{% endif %}">
+          <i class="fa-solid fa-user-shield"></i> Admin
+        </a>
+        {% endif %}
+        <div class="nav-user">
+          <span class="user-badge">
+            <i class="fa-solid fa-circle-user"></i> {{ session.get('username') }}
+          </span>
+          <a href="{{ url_for('logout') }}" class="btn btn-secondary btn-sm" title="Log Out">
+            <i class="fa-solid fa-right-from-bracket"></i>
+          </a>
+        </div>
+      {% else %}
+        <a href="{{ url_for('login') }}" class="btn btn-primary btn-sm">
+          <i class="fa-solid fa-right-to-bracket"></i> Login
+        </a>
+      {% endif %}
+    </div>
+  </nav>
+
+  <!-- Flash Messages -->
+  <div class="container" style="padding-top: 1rem; padding-bottom: 0;">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="flash-container">
+          {% for category, message in messages %}
+            <div class="alert alert-{{ category if category != 'error' else 'danger' }}">
+              <div>
+                {% if category == 'success' %}
+                  <i class="fa-solid fa-circle-check" style="margin-right: 0.5rem;"></i>
+                {% elif category == 'danger' or category == 'error' %}
+                  <i class="fa-solid fa-triangle-exclamation" style="margin-right: 0.5rem;"></i>
+                {% else %}
+                  <i class="fa-solid fa-circle-info" style="margin-right: 0.5rem;"></i>
+                {% endif %}
+                {{ message }}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+  </div>
+
+  <!-- Main Content Block -->
+  {% block content %}{% endblock %}
+
+  <!-- Footer -->
+  <footer class="footer">
+    <p>&copy; 2026 QR-Based Attendance System &bull; Secure, Fast &amp; Automated</p>
+  </footer>
+
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
