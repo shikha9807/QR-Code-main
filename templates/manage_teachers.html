@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Teachers - Admin{% endblock %}
+
+{% block content %}
+<div class="container">
+  <div class="page-header">
+    <h1><i class="fa-solid fa-chalkboard-user"></i> Manage Teachers</h1>
+    <a href="{{ url_for('admin_dashboard') }}" class="btn btn-secondary btn-sm"><i class="fa-solid fa-arrow-left"></i> Back to Admin</a>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h3>Create Teacher Account</h3>
+    </div>
+    <div class="card-body">
+      <form method="POST" class="form-grid">
+        <div class="form-group">
+          <label>Username</label>
+          <input type="text" name="username" placeholder="e.g. prof_smith" required>
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" name="password" placeholder="Secure password" required>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Create Account</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 2rem;">
+    <div class="card-header">
+      <h3>Faculty List & Assignments</h3>
+    </div>
+    <div class="card-body">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Username</th>
+            <th>Role</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for teacher in teachers %}
+          <tr>
+            <td>{{ teacher.id }}</td>
+            <td>{{ teacher.username }}</td>
+            <td>{{ teacher.role }}</td>
+          </tr>
+          {% endfor %}
+          {% if not teachers %}
+          <tr>
+            <td colspan="3" style="text-align: center;">No teachers found.</td>
+          </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 2rem;">
+    <div class="card-header">
+      <h3>Assign Course to Teacher</h3>
+    </div>
+    <div class="card-body">
+      <form action="{{ url_for('assign_teacher') }}" method="POST" class="form-grid">
+        <div class="form-group">
+          <label>Teacher ID</label>
+          <input type="number" name="teacher_id" placeholder="Enter Teacher ID" required>
+        </div>
+        <div class="form-group">
+          <label>Course ID</label>
+          <input type="number" name="course_id" placeholder="Enter Course ID" required>
+        </div>
+        <div class="form-group">
+          <label>Section ID</label>
+          <input type="number" name="section_id" placeholder="Enter Section ID" required>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Assign Course</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

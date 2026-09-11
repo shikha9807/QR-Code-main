@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Import Students - Admin{% endblock %}
+
+{% block content %}
+<div class="container">
+  <div class="page-header">
+    <h1><i class="fa-solid fa-file-import"></i> Bulk Student Import</h1>
+    <a href="{{ url_for('admin_dashboard') }}" class="btn btn-secondary btn-sm"><i class="fa-solid fa-arrow-left"></i> Back to Admin</a>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h3>Upload Student Data</h3>
+      <p>Upload a CSV, Excel (XLSX), or JSON file to bulk register students.</p>
+    </div>
+    <div class="card-body">
+      <form method="POST" enctype="multipart/form-data" class="form-grid">
+        <div class="form-group">
+          <label>Select File</label>
+          <input type="file" name="file" accept=".csv, .xlsx, .xls, .json" required>
+        </div>
+
+        <div class="form-group">
+          <label>Import Mode</label>
+          <select name="mode" required>
+            <option value="skip_invalid" selected>Import valid records and skip invalid ones</option>
+            <option value="all_or_nothing">Import only if all records are valid (All or Nothing)</option>
+          </select>
+        </div>
+
+        <div class="form-group" style="display: flex; align-items: center; gap: 0.5rem; margin-top: 1rem;">
+          <input type="checkbox" name="update" id="update_existing">
+          <label for="update_existing">Update existing students (based on roll number)</label>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Start Import</button>
+        </div>
+      </form>
+
+      <div class="template-downloads" style="margin-top: 2rem; border-top: 1px solid #eee; padding-top: 1.5rem;">
+        <h4><i class="fa-solid fa-download"></i> Download Sample Templates</h4>
+        <p>Ensure your file matches the required format to avoid import errors.</p>
+        <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+          <a href="{{ url_for('import_template', ext='csv') }}" class="btn btn-secondary btn-sm">
+            <i class="fa-solid fa-file-csv"></i> CSV Template
+          </a>
+          <a href="{{ url_for('import_template', ext='xlsx') }}" class="btn btn-secondary btn-sm">
+            <i class="fa-solid fa-file-excel"></i> Excel Template
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if errors %}
+  <div class="card" style="margin-top: 2rem; border-left: 5px solid #ef4444;">
+    <div class="card-header">
+      <h3 style="color: #ef4444;"><i class="fa-solid fa-triangle-exclamation"></i> Import Errors</h3>
+    </div>
+    <div class="card-body">
+      <table class="data-table">
+        <thead style="background: #fee2e2;">
+          <tr>
+            <th>Row</th>
+            <th>Roll Number</th>
+            <th>Issue</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for err in errors %}
+          <tr>
+            <td>{{ err.row }}</td>
+            <td>{{ err.roll }}</td>
+            <td style="color: #b91c1c;">{{ err.reasons }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

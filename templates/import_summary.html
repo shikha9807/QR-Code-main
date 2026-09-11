@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Import Summary - Admin{% endblock %}
+
+{% block content %}
+<div class="container">
+  <div class="page-header">
+    <h1><i class="fa-solid fa-circle-check"></i> Import Summary</h1>
+    <a href="{{ url_for('import_students') }}" class="btn btn-secondary btn-sm"><i class="fa-solid fa-arrow-left"></i> Back to Import</a>
+  </div>
+
+  <div class="summary-grid">
+    <div class="summary-card">
+      <span class="summary-label">Total Rows Processed</span>
+      <span class="summary-value">{{ summary.total }}</span>
+    </div>
+    <div class="summary-card success">
+      <span class="summary-label">Successfully Imported</span>
+      <span class="summary-value">{{ summary.success }}</span>
+    </div>
+    <div class="summary-card danger">
+      <span class="summary-label">Skipped / Invalid</span>
+      <span class="summary-value">{{ summary.failures }}</span>
+    </div>
+  </div>
+
+  {% if summary.failures > 0 %}
+  <div class="card" style="margin-top: 2rem;">
+    <div class="card-header">
+      <h3 style="color: #ef4444;"><i class="fa-solid fa-triangle-exclamation"></i> Error Details</h3>
+      {% if summary.import_id %}
+      <a href="{{ url_for('import_report', import_id=summary.import_id) }}" class="btn btn-secondary btn-sm">
+        <i class="fa-solid fa-file-csv"></i> Download Full Error Report (CSV)
+      </a>
+      {% endif %}
+    </div>
+    <div class="card-body">
+      <table class="data-table">
+        <thead style="background: #fee2e2;">
+          <tr>
+            <th>Row</th>
+            <th>Roll Number</th>
+            <th>Issue</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for err in errors %}
+          <tr>
+            <td>{{ err.row }}</td>
+            <td>{{ err.roll }}</td>
+            <td style="color: #b91c1c;">{{ err.reasons }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<style>
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.5rem;
+  margin-top: 2rem;
+}
+.summary-card {
+  background: white;
+  padding: 2rem;
+  border-radius: 12px;
+  text-align: center;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+  border: 1px solid #eee;
+}
+.summary-card .summary-label {
+  display: block;
+  color: #64748b;
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem;
+}
+.summary-card .summary-value {
+  font-size: 2.5rem;
+  font-weight: 800;
+  color: #1e293b;
+}
+.summary-card.success {
+  border-top: 5px solid #22c55e;
+}
+.summary-card.success .summary-value {
+  color: #16a34a;
+}
+.summary-card.danger {
+  border-top: 5px solid #ef4444;
+}
+.summary-card.danger .summary-value {
+  color: #dc2626;
+}
+</style>
+{% endblock %}
