@@ -1,0 +1,133 @@
+{% extends 'base.html' %}
+
+{% block title %}Dashboard - QR Attendance System{% endblock %}
+
+{% block content %}
+<div class="container">
+  
+  <!-- Header Bar -->
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem;">
+    <div>
+      <h1 style="font-size: 1.85rem; font-weight: 800; color: #ffffff; letter-spacing: -0.02em;">
+        Instructor Dashboard
+      </h1>
+      <p style="color: var(--text-muted); font-size: 0.95rem; margin-top: 0.2rem;">
+        Generate dynamic QR codes and monitor attendance in real-time.
+      </p>
+    </div>
+    
+    <form method="POST" action="{{ url_for('start_session') }}">
+      <button type="submit" class="btn btn-primary btn-lg" style="box-shadow: var(--shadow-glow);">
+        <i class="fa-solid fa-plus-circle"></i> Launch Live QR Session
+      </button>
+    </form>
+  </div>
+
+  <!-- Stats Grid -->
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-icon icon-purple">
+        <i class="fa-solid fa-qrcode"></i>
+      </div>
+      <div class="stat-info">
+        <div class="stat-value">{{ total_sessions }}</div>
+        <div class="stat-label">Total Sessions</div>
+      </div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-icon icon-cyan">
+        <i class="fa-solid fa-users"></i>
+      </div>
+      <div class="stat-info">
+        <div class="stat-value">{{ total_attendance }}</div>
+        <div class="stat-label">Total Attendances</div>
+      </div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-icon icon-green">
+        <i class="fa-solid fa-tower-broadcast"></i>
+      </div>
+      <div class="stat-info">
+        <div class="stat-value">{{ active_sessions }}</div>
+        <div class="stat-label">Active Sessions</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recent Sessions Card -->
+  <div class="card">
+    <div class="card-header">
+      <h2 class="card-title">
+        <i class="fa-solid fa-clock-rotate-left" style="color: var(--primary);"></i> Recent Sessions
+      </h2>
+      <a href="{{ url_for('reports') }}" class="btn btn-secondary btn-sm">
+        <i class="fa-solid fa-list-check"></i> View Full Reports
+      </a>
+    </div>
+
+    {% if sessions %}
+      <div class="table-responsive">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Session ID</th>
+              <th>Created At</th>
+              <th>Expiry</th>
+              <th>Attendees</th>
+              <th>Status</th>
+              <th style="text-align: right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for sess in sessions %}
+              {% set is_active = sess.expiry_time > now_str %}
+              <tr>
+                <td>
+                  <span style="font-family: var(--font-mono); font-weight: 700; color: #ffffff;">#{{ sess.id }}</span>
+                </td>
+                <td>{{ sess.created_at }}</td>
+                <td>{{ sess.expiry_time }}</td>
+                <td>
+                  <span style="font-weight: 700; color: #38bdf8;">
+                    <i class="fa-solid fa-user-check"></i> {{ sess.attendee_count }}
+                  </span>
+                </td>
+                <td>
+                  {% if is_active %}
+                    <span class="badge badge-active"><i class="fa-solid fa-circle-dot"></i> Active</span>
+                  {% else %}
+                    <span class="badge badge-expired"><i class="fa-solid fa-clock"></i> Expired</span>
+                  {% endif %}
+                </td>
+                <td style="text-align: right;">
+                  <div style="display: inline-flex; gap: 0.5rem;">
+                    <a href="{{ url_for('view_session', session_id=sess.id) }}" class="btn btn-primary btn-sm" title="Open QR Screen">
+                      <i class="fa-solid fa-expand"></i> QR View
+                    </a>
+                    <a href="{{ url_for('export_session', session_id=sess.id) }}" class="btn btn-secondary btn-sm" title="Export CSV">
+                      <i class="fa-solid fa-download"></i> CSV
+                    </a>
+                  </div>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div style="text-align: center; padding: 3rem 1rem;">
+        <div style="font-size: 3rem; color: var(--text-dim); margin-bottom: 1rem;">
+          <i class="fa-regular fa-folder-open"></i>
+        </div>
+        <h3 style="color: #ffffff; font-weight: 700;">No Sessions Created Yet</h3>
+        <p style="color: var(--text-muted); font-size: 0.95rem; margin-top: 0.25rem; max-width: 400px; margin-left: auto; margin-right: auto;">
+          Click the "Launch Live QR Session" button above to generate your first live QR code.
+        </p>
+      </div>
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}

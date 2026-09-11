@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ 'Success' if status == 'success' else 'Attention' }} - Attendance Status</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body style="display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 1.5rem;">
+  
+  <div class="container container-narrow">
+    <div class="card feedback-card">
+      
+      {% if status == 'success' %}
+        <div class="feedback-icon-box feedback-icon-success">
+          <i class="fa-solid fa-circle-check"></i>
+        </div>
+
+        <h1 style="font-size: 1.75rem; font-weight: 800; color: #ffffff; margin-bottom: 0.5rem;">
+          Attendance Confirmed!
+        </h1>
+        
+        <p style="color: #6ee7b7; font-size: 1.05rem; font-weight: 600; margin-bottom: 1.5rem;">
+          {{ message }}
+        </p>
+
+        {% if student_name %}
+          <div style="background: rgba(255, 255, 255, 0.04); border: 1px solid var(--border-glass); border-radius: var(--radius-md); padding: 1rem; margin-bottom: 2rem; text-align: left;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem; font-size: 0.88rem;">
+              <span style="color: var(--text-muted);">Attendee:</span>
+              <span style="color: #ffffff; font-weight: 700;">{{ student_name }}</span>
+            </div>
+            {% if timestamp %}
+              <div style="display: flex; justify-content: space-between; font-size: 0.88rem;">
+                <span style="color: var(--text-muted);">Timestamp:</span>
+                <span style="color: var(--text-muted); font-family: var(--font-mono);">{{ timestamp }}</span>
+              </div>
+            {% endif %}
+          </div>
+        {% endif %}
+
+      {% else %}
+        <div class="feedback-icon-box feedback-icon-error">
+          <i class="fa-solid fa-triangle-exclamation"></i>
+        </div>
+
+        <h1 style="font-size: 1.75rem; font-weight: 800; color: #ffffff; margin-bottom: 0.5rem;">
+          Submission Notice
+        </h1>
+        
+        <p style="color: #fca5a5; font-size: 1.05rem; font-weight: 500; margin-bottom: 2rem; line-height: 1.5;">
+          {{ message }}
+        </p>
+      {% endif %}
+
+      <div>
+        <p style="color: var(--text-dim); font-size: 0.85rem;">
+          You may now safely close this window.
+        </p>
+      </div>
+
+    </div>
+  </div>
+
+</body>
+</html>

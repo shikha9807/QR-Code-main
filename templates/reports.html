@@ -1,0 +1,147 @@
+{% extends 'base.html' %}
+
+{% block title %}Attendance Reports &amp; Records - QR Attendance{% endblock %}
+
+{% block content %}
+<div class="container container-wide">
+  
+  <!-- Header Bar -->
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem;">
+    <div>
+      <h1 style="font-size: 1.85rem; font-weight: 800; color: #ffffff; letter-spacing: -0.02em;">
+        Attendance Logs &amp; Reports
+      </h1>
+      <p style="color: var(--text-muted); font-size: 0.95rem; margin-top: 0.2rem;">
+        Detailed audit trail of all sessions and registered attendees.
+      </p>
+    </div>
+
+    <div style="display: flex; gap: 0.75rem;">
+      <a href="{{ url_for('dashboard') }}" class="btn btn-secondary btn-sm">
+        <i class="fa-solid fa-arrow-left"></i> Back to Dashboard
+      </a>
+      <form method="POST" action="{{ url_for('start_session') }}" style="display: inline;">
+        <button type="submit" class="btn btn-primary btn-sm">
+          <i class="fa-solid fa-plus"></i> New Session
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Summary Cards -->
+  <div class="stats-grid" style="margin-bottom: 2rem;">
+    <div class="stat-card">
+      <div class="stat-icon icon-purple">
+        <i class="fa-solid fa-folder-closed"></i>
+      </div>
+      <div class="stat-info">
+        <div class="stat-value">{{ total_sessions }}</div>
+        <div class="stat-label">Archived Sessions</div>
+      </div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-icon icon-cyan">
+        <i class="fa-solid fa-user-check"></i>
+      </div>
+      <div class="stat-info">
+        <div class="stat-value">{{ total_scans }}</div>
+        <div class="stat-label">Total Student Records</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reports Listing -->
+  {% if reports %}
+    <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+      {% for rep in reports %}
+        <div class="card" style="padding: 1.5rem;">
+          
+          <!-- Session Header Row -->
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border-glass);">
+            <div>
+              <div style="display: flex; align-items: center; gap: 0.75rem;">
+                <h3 style="font-size: 1.2rem; font-weight: 700; color: #ffffff;">
+                  Session #{{ rep.session_id }}
+                </h3>
+                <span class="badge badge-active">
+                  <i class="fa-solid fa-users"></i> {{ rep.count }} Attendees
+                </span>
+              </div>
+              <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.25rem;">
+                <span>Created: {{ rep.created_at }}</span> &bull; 
+                <span>Expires: {{ rep.expiry_time }}</span>
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+              <a href="{{ url_for('view_session', session_id=rep.session_id) }}" class="btn btn-secondary btn-sm" title="View Session">
+                <i class="fa-solid fa-qrcode"></i> QR View
+              </a>
+              <a href="{{ url_for('export_session', session_id=rep.session_id) }}" class="btn btn-primary btn-sm" title="Download CSV">
+                <i class="fa-solid fa-file-arrow-down"></i> Export CSV
+              </a>
+              <form method="POST" action="{{ url_for('delete_session', session_id=rep.session_id) }}" onsubmit="return confirm('Are you sure you want to delete Session #{{ rep.session_id }} and all its attendance records?');" style="display: inline;">
+                <button type="submit" class="btn btn-danger btn-sm" title="Delete Session">
+                  <i class="fa-solid fa-trash-can"></i>
+                </button>
+              </form>
+            </div>
+          </div>
+
+          <!-- Attendee Table for this Session -->
+          {% if rep.students %}
+            <div class="table-responsive" style="margin-top: 1rem;">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th style="width: 60px;">#</th>
+                    <th>Student Name / Roll ID</th>
+                    <th>Recorded Timestamp</th>
+                    <th style="text-align: right; width: 100px;">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for student in rep.students %}
+                    <tr>
+                      <td style="font-family: var(--font-mono); color: var(--text-dim);">{{ loop.index }}</td>
+                      <td style="font-weight: 600; color: #ffffff;">
+                        <i class="fa-regular fa-user" style="margin-right: 0.4rem; color: var(--secondary);"></i>
+                        {{ student.student_id }}
+                      </td>
+                      <td style="font-family: var(--font-mono); font-size: 0.88rem;">{{ student.timestamp }}</td>
+                      <td style="text-align: right;">
+                        <form method="POST" action="{{ url_for('delete_attendance', session_id=rep.session_id, attendance_id=student.id) }}" onsubmit="return confirm('Remove this attendance record?');" style="display: inline;">
+                          <button type="submit" class="btn btn-danger btn-sm" style="padding: 0.25rem 0.6rem; font-size: 0.78rem;" title="Remove Record">
+                            <i class="fa-solid fa-xmark"></i>
+                          </button>
+                        </form>
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <div style="padding: 1.5rem 0.5rem; text-align: center; color: var(--text-dim); font-size: 0.9rem;">
+              <i class="fa-regular fa-circle-question" style="margin-right: 0.35rem;"></i> No students marked attendance for this session.
+            </div>
+          {% endif %}
+
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="card" style="text-align: center; padding: 4rem 1rem;">
+      <div style="font-size: 3rem; color: var(--text-dim); margin-bottom: 1rem;">
+        <i class="fa-solid fa-box-archive"></i>
+      </div>
+      <h3 style="color: #ffffff; font-weight: 700;">No Attendance Records Found</h3>
+      <p style="color: var(--text-muted); font-size: 0.95rem; margin-top: 0.25rem;">
+        Start a session and have students scan the QR code to see records here.
+      </p>
+    </div>
+  {% endif %}
+
+</div>
+{% endblock %}

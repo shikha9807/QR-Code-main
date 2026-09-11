@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Sections - Admin{% endblock %}
+
+{% block content %}
+<div class="container">
+  <div class="page-header">
+    <h1><i class="fa-solid fa-layer-group"></i> Manage Sections</h1>
+    <a href="{{ url_for('admin_dashboard') }}" class="btn btn-secondary btn-sm"><i class="fa-solid fa-arrow-left"></i> Back to Admin</a>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h3>Add New Section</h3>
+    </div>
+    <div class="card-body">
+      <form method="POST" class="form-grid">
+        <div class="form-group">
+          <label>Section Name</label>
+          <input type="text" name="section_name" placeholder="e.g. Section A" required>
+        </div>
+        <div class="form-group">
+          <label>Assign to Course</label>
+          <select name="course_id" required>
+            <option value="">Select Course</option>
+            {% for course in courses %}
+            <option value="{{ course.id }}">{{ course.course_code }} - {{ course.course_name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Save Section</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 2rem;">
+    <div class="card-header">
+      <h3>Existing Sections</h3>
+    </div>
+    <div class="card-body">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Section</th>
+            <th>Course</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for section in sections %}
+          <tr>
+            <td>{{ section.section_name }}</td>
+            <td>{{ section.course_name }}</td>
+          </tr>
+          {% endfor %}
+          {% if not sections %}
+          <tr>
+            <td colspan="2" style="text-align: center;">No sections added yet.</td>
+          </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,95 @@
+{% extends 'base.html' %}
+
+{% block title %}Sign In - QR Attendance System{% endblock %}
+
+{% block content %}
+<div class="container container-narrow" style="margin-top: 2rem; margin-bottom: 3rem;">
+  <div class="card" style="padding: 2.5rem 2rem;">
+    
+    <div style="text-align: center; margin-bottom: 2rem;">
+      <div class="brand-badge" style="width: 54px; height: 54px; font-size: 1.75rem; margin: 0 auto 1rem; border-radius: 14px;">
+        <i class="fa-solid fa-qrcode"></i>
+      </div>
+      <h2 style="font-size: 1.6rem; font-weight: 800; color: #ffffff; letter-spacing: -0.02em;">
+        {{ 'Create Teacher Account' if register_mode else 'Welcome Back' }}
+      </h2>
+      <p style="color: var(--text-muted); font-size: 0.95rem; margin-top: 0.25rem;">
+        {{ 'Register your credentials to start managing sessions' if register_mode else 'Sign in to manage your QR attendance sessions' }}
+      </p>
+    </div>
+
+    {% if register_mode %}
+      <form method="POST" action="{{ url_for('register') }}">
+        <div class="form-group">
+          <label class="form-label" for="reg_username">Username</label>
+          <input type="text" id="reg_username" name="username" class="form-control" placeholder="e.g. prof_johnson" required autofocus>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="reg_password">Password</label>
+          <input type="password" id="reg_password" name="password" class="form-control" placeholder="••••••••" required>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="reg_role">Role</label>
+          <select id="reg_role" name="role" class="form-control">
+            <option value="teacher">Teacher / Instructor</option>
+            <option value="admin">Administrator</option>
+          </select>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-block btn-lg" style="margin-top: 1.5rem;">
+          <i class="fa-solid fa-user-plus"></i> Create Account
+        </button>
+
+        <div style="text-align: center; margin-top: 1.5rem; font-size: 0.9rem; color: var(--text-muted);">
+          Already have an account? <a href="{{ url_for('login') }}" style="color: var(--primary); text-decoration: none; font-weight: 600;">Log In</a>
+        </div>
+      </form>
+    {% else %}
+      <form method="POST" action="{{ url_for('login') }}">
+        <div class="form-group">
+          <label class="form-label" for="username">Username</label>
+          <input type="text" id="username" name="username" class="form-control" placeholder="e.g. admin" required autofocus>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="password">Password</label>
+          <input type="password" id="password" name="password" class="form-control" placeholder="••••••••" required>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-block btn-lg" style="margin-top: 1.5rem;">
+          <i class="fa-solid fa-arrow-right-to-bracket"></i> Sign In
+        </button>
+      </form>
+
+      <!-- Demo Quick Fill Box -->
+      <div style="margin-top: 1.75rem; padding: 1rem; background: rgba(99, 102, 241, 0.08); border: 1px dashed rgba(99, 102, 241, 0.3); border-radius: var(--radius-md);">
+        <div style="font-size: 0.85rem; font-weight: 700; color: #a5b4fc; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem;">
+          <span><i class="fa-solid fa-key"></i> Default Demo Credentials</span>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="quickFillAdmin()" style="font-size: 0.75rem; padding: 0.2rem 0.6rem;">
+            Auto Fill
+          </button>
+        </div>
+        <div style="font-size: 0.82rem; color: var(--text-muted); font-family: var(--font-mono);">
+          Username: <span style="color: #ffffff;">admin</span> &bull; Password: <span style="color: #ffffff;">admin123</span>
+        </div>
+      </div>
+
+      <div style="text-align: center; margin-top: 1.5rem; font-size: 0.9rem; color: var(--text-muted);">
+        Need a new teacher account? <a href="{{ url_for('register') }}" style="color: var(--primary); text-decoration: none; font-weight: 600;">Register here</a>
+      </div>
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  function quickFillAdmin() {
+    document.getElementById('username').value = 'admin';
+    document.getElementById('password').value = 'admin123';
+  }
+</script>
+{% endblock %}

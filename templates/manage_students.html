@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}Students - Admin{% endblock %}
+
+{% block content %}
+<div class="container">
+  <div class="page-header">
+    <h1><i class="fa-solid fa-graduation-cap"></i> Manage Students</h1>
+    <a href="{{ url_for('admin_dashboard') }}" class="btn btn-secondary btn-sm"><i class="fa-solid fa-arrow-left"></i> Back to Admin</a>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h3>Register New Student</h3>
+    </div>
+    <div class="card-body">
+      <form method="POST" class="form-grid">
+        <div class="form-group">
+          <label>Roll Number</label>
+          <input type="text" name="roll_number" placeholder="e.g. 2024CS01" required>
+        </div>
+        <div class="form-group">
+          <label>Full Name</label>
+          <input type="text" name="full_name" placeholder="e.g. John Doe" required>
+        </div>
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" name="email" placeholder="e.g. john@university.edu" required>
+        </div>
+        <div class="form-group">
+          <label>Department</label>
+          <select name="dept_id" required>
+            <option value="">Select Department</option>
+            {% for dept in departments %}
+            <option value="{{ dept.id }}">{{ dept.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Program</label>
+          <input type="text" name="program" placeholder="e.g. B.Tech" required>
+        </div>
+        <div class="form-group">
+          <label>Semester</label>
+          <input type="number" name="semester" min="1" max="12" required>
+        </div>
+        <div class="form-group">
+          <label>Section</label>
+          <select name="section_id" required>
+            <option value="">Select Section</option>
+            {% for sect in sections %}
+            <option value="{{ sect.id }}">{{ sect.section_name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Register Student</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 2rem;">
+    <div class="card-header">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+        <h3>Student Directory</h3>
+        <form method="GET" class="search-form" style="display: flex; gap: 0.5rem; align-items: center;">
+          <select name="dept_id" class="form-control" style="width: auto;">
+            <option value="">All Depts</option>
+            {% for dept in departments %}
+            <option value="{{ dept.id }}" {% if dept_filter == dept.id|string %}selected{% endif %}>{{ dept.name }}</option>
+            {% endfor %}
+          </select>
+          <select name="section_id" class="form-control" style="width: auto;">
+            <option value="">All Sections</option>
+            {% for sect in sections %}
+            <option value="{{ sect.id }}" {% if sect_filter == sect.id|string %}selected{% endif %}>{{ sect.section_name }}</option>
+            {% endfor %}
+          </select>
+          <input type="text" name="search" value="{{ search }}" placeholder="Search roll no or name...">
+          <button type="submit" class="btn btn-secondary btn-sm"><i class="fa-solid fa-magnifying-glass"></i></button>
+        </form>
+      </div>
+    </div>
+    <div class="card-body">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Roll No</th>
+            <th>Name</th>
+            <th>Dept</th>
+            <th>Program</th>
+            <th>Sem</th>
+            <th>Section</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for student in students %}
+          <tr>
+            <td class="font-bold">{{ student.roll_number }}</td>
+            <td>{{ student.full_name }}</td>
+            <td>{{ student.dept_name }}</td>
+            <td>{{ student.program }}</td>
+            <td>{{ student.semester }}</td>
+            <td>{{ student.section_name }}</td>
+          </tr>
+          {% endfor %}
+          {% if not students %}
+          <tr>
+            <td colspan="6" style="text-align: center;">No students found.</td>
+          </tr>
+          {% endif %}
+        </tbody>
+      </table>
+
+      {% if total_pages > 1 %}
+      <div class="pagination" style="display: flex; justify-content: center; gap: 0.5rem; margin-top: 1.5rem;">
+        {% if page > 1 %}
+        <a href="{{ url_for('manage_students', page=page-1, search=search, dept_id=dept_filter, section_id=sect_filter) }}" class="btn btn-secondary btn-sm">
+          <i class="fa-solid fa-chevron-left"></i>
+        </a>
+        {% endif %}
+
+        <span style="align-self: center; font-weight: 600;">
+          Page {{ page }} of {{ total_pages }} <span style="color: #64748b; font-weight: normal; margin-left: 0.5rem;">({{ total_students }} total)</span>
+        </span>
+
+        {% if page < total_pages %}
+        <a href="{{ url_for('manage_students', page=page+1, search=search, dept_id=dept_filter, section_id=sect_filter) }}" class="btn btn-secondary btn-sm">
+          <i class="fa-solid fa-chevron-right"></i>
+        </a>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
