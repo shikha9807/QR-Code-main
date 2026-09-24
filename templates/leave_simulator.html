@@ -1,0 +1,193 @@
+{% extends 'base.html' %}
+
+{% block title %}What-If Attendance Simulator - AI Predictor{% endblock %}
+
+{% block content %}
+<div class="container container-wide">
+
+  <!-- Header -->
+  <div class="ai-header-bar">
+    <div>
+      <div class="ai-chip">
+        <i class="fa-solid fa-sliders"></i> Interactive What-If Engine
+      </div>
+      <h1 class="ai-title">
+        What-If Attendance Simulator
+      </h1>
+      <p class="ai-subtitle">
+        Simulate future absence scenarios, evaluate threshold risk margins, and calculate consecutive recovery goals.
+      </p>
+    </div>
+
+    <div class="ai-action-buttons">
+      <a href="{{ url_for('apply_leave') }}" class="btn btn-primary btn-sm">
+        <i class="fa-solid fa-paper-plane"></i> Apply for Leave
+      </a>
+      <a href="{{ url_for('student_leave_history') }}" class="btn btn-secondary btn-sm">
+        <i class="fa-solid fa-clock-rotate-left"></i> My Leaves
+      </a>
+    </div>
+  </div>
+
+  <!-- Standing KPI Summary Banner -->
+  <div class="stats-grid" style="margin-bottom: 2rem;">
+    <div class="stat-card">
+      <div class="stat-icon icon-purple">
+        <i class="fa-solid fa-user-graduate"></i>
+      </div>
+      <div class="stat-info">
+        <div class="stat-value">{{ sim.student.full_name }}</div>
+        <div class="stat-label">Roll: {{ sim.student.roll_number }}</div>
+      </div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-icon icon-cyan">
+        <i class="fa-solid fa-percent"></i>
+      </div>
+      <div class="stat-info">
+        <div class="stat-value" style="color: {% if sim.current_attendance_pct < sim.threshold %}#ef4444{% else %}#10b981{% endif %};">
+          {{ sim.current_attendance_pct }}%
+        </div>
+        <div class="stat-label">Current Standing (Target: {{ sim.threshold }}%)</div>
+      </div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-icon icon-green">
+        <i class="fa-solid fa-shield-halved"></i>
+      </div>
+      <div class="stat-info">
+        <div class="stat-value" style="color: #38bdf8;">{{ sim.buffer_missable }}</div>
+        <div class="stat-label">Safe Classes Missable (Margin)</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Interactive Custom Absence Simulator Slider Card -->
+  <div class="card" style="padding: 2rem; margin-bottom: 2rem;">
+    <div class="card-header" style="border: none; padding: 0; margin-bottom: 1.5rem;">
+      <h2 class="card-title">
+        <i class="fa-solid fa-wand-magic-sparkles" style="color: var(--secondary);"></i> 
+        Simulate Custom Future Absence
+      </h2>
+      <span style="color: var(--text-muted); font-size: 0.85rem;">
+        Move the slider or enter number of missed lectures to preview the exact outcome.
+      </span>
+    </div>
+
+    <div style="display: flex; gap: 1.5rem; align-items: center; flex-wrap: wrap; background: rgba(0, 0, 0, 0.25); padding: 1.5rem; border-radius: var(--radius-md); border: 1px solid var(--border-glass);">
+      <div style="flex: 2; min-width: 250px;">
+        <label class="form-label" for="customMissSlider" style="display: flex; justify-content: space-between;">
+          <span>Number of Future Missed Classes:</span>
+          <strong id="sliderDisplayVal" style="font-size: 1.1rem; color: var(--secondary);">3 classes</strong>
+        </label>
+        <input type="range" id="customMissSlider" min="1" max="25" value="3" class="form-control" style="cursor: pointer;" oninput="onSliderChange(this.value)">
+      </div>
+
+      <div style="flex: 1; min-width: 140px; text-align: center; border-left: 1px solid var(--border-glass); padding-left: 1.5rem;">
+        <div style="font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase;">Simulated Attendance</div>
+        <div id="simulatedVal" style="font-size: 2rem; font-weight: 800; color: #10b981;">--%</div>
+        <div id="simulatedRiskBadge" class="badge badge-ai-safe" style="margin-top: 0.25rem;">Safe</div>
+      </div>
+    </div>
+
+    <!-- Consecutive Recovery Notice Box -->
+    <div style="margin-top: 1.5rem; padding: 1rem 1.25rem; border-radius: var(--radius-sm); background: rgba(99, 102, 241, 0.1); border-left: 4px solid var(--primary); display: flex; align-items: center; gap: 1rem;">
+      <i class="fa-solid fa-bullseye" style="font-size: 1.5rem; color: var(--secondary);"></i>
+      <div>
+        <div style="font-weight: 700; color: #ffffff; font-size: 0.95rem;">Attendance Target Calculator</div>
+        <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.2rem;" id="recoveryMsg">
+          {% if sim.consecutive_needed > 0 %}
+            You need to attend <strong>{{ sim.consecutive_needed }} consecutive future classes</strong> to regain the {{ sim.threshold }}% requirement.
+          {% else %}
+            You are currently meeting the {{ sim.threshold }}% minimum. You can safely miss <strong>{{ sim.buffer_missable }} classes</strong> without falling below the threshold.
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Standard Scenarios Comparison Grid -->
+  <div class="card" style="padding: 2rem;">
+    <div class="card-header" style="border: none; padding: 0; margin-bottom: 1.5rem;">
+      <h2 class="card-title">
+        <i class="fa-solid fa-chart-column" style="color: var(--primary);"></i> 
+        Standard Scenario Impact Breakdown
+      </h2>
+      <span style="color: var(--text-muted); font-size: 0.85rem;">
+        Pre-calculated projections for common absence durations.
+      </span>
+    </div>
+
+    <div class="sim-grid">
+      {% for sc in sim.scenarios %}
+        <div class="sim-card {% if sc.is_below_threshold %}card-danger{% else %}card-safe{% endif %}">
+          <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700;">
+            Scenario {{ loop.index }}
+          </div>
+          <div style="font-size: 1.3rem; font-weight: 800; color: #ffffff; margin: 0.35rem 0;">
+            Miss {{ sc.miss_count }} Class{% if sc.miss_count > 1 %}es{% endif %}
+          </div>
+          <div style="font-size: 1.5rem; font-weight: 800; color: {% if sc.is_below_threshold %}#ef4444{% else %}#10b981{% endif %};">
+            {{ sc.projected_pct }}%
+          </div>
+          <div style="font-size: 0.78rem; color: #f59e0b; font-weight: 600; margin-top: 0.2rem;">
+            -{{ sc.drop }}% drop
+          </div>
+          <div style="margin-top: 0.75rem;">
+            {% if sc.is_below_threshold %}
+              <span class="badge badge-ai-critical"><i class="fa-solid fa-radiation"></i> High Risk</span>
+            {% elif sc.risk_level == 'WARNING' %}
+              <span class="badge badge-ai-moderate"><i class="fa-solid fa-triangle-exclamation"></i> Warning</span>
+            {% else %}
+              <span class="badge badge-ai-safe"><i class="fa-solid fa-circle-check"></i> Safe</span>
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const currentAttended = {{ sim.attended }};
+const currentConducted = {{ sim.conducted }};
+const threshold = {{ sim.threshold }};
+
+function onSliderChange(val) {
+  document.getElementById('sliderDisplayVal').textContent = val + ' class' + (val > 1 ? 'es' : '');
+
+  const miss = parseInt(val);
+  const projCond = currentConducted + miss;
+  const projAtt = currentAttended;
+  const projPct = projCond > 0 ? ((projAtt / projCond) * 100).toFixed(1) : 0;
+
+  const simValEl = document.getElementById('simulatedVal');
+  const simBadgeEl = document.getElementById('simulatedRiskBadge');
+
+  simValEl.textContent = projPct + '%';
+  if (projPct < threshold) {
+    simValEl.style.color = '#ef4444';
+    simBadgeEl.className = 'badge badge-ai-critical';
+    simBadgeEl.textContent = 'High Risk (<' + threshold + '%)';
+  } else if (projPct < (threshold + 5)) {
+    simValEl.style.color = '#f59e0b';
+    simBadgeEl.className = 'badge badge-ai-moderate';
+    simBadgeEl.textContent = 'Warning Alert';
+  } else {
+    simValEl.style.color = '#10b981';
+    simBadgeEl.className = 'badge badge-ai-safe';
+    simBadgeEl.textContent = 'Safe Standing';
+  }
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+  onSliderChange(3);
+});
+</script>
+{% endblock %}

@@ -1,0 +1,428 @@
+{% extends 'base.html' %}
+
+{% block title %}AI Student Retention & Attendance Risk Predictor{% endblock %}
+
+{% block content %}
+<div class="container container-wide">
+  
+  <!-- Page Header -->
+  <div class="ai-header-bar">
+    <div>
+      <div class="ai-chip">
+        <i class="fa-solid fa-brain-circuit"></i> AI-Powered Retention Engine
+      </div>
+      <h1 class="ai-title">
+        Student Attendance Risk Predictor
+      </h1>
+      <p class="ai-subtitle">
+        Proactive early-warning forecasting, momentum velocity analysis, and prescriptive recovery plans.
+      </p>
+    </div>
+
+    <div class="ai-action-buttons">
+      <a href="{{ url_for('export_risk_report', dept_id=dept_filter, section_id=sect_filter, risk=risk_filter, search=search) }}" class="btn btn-secondary btn-sm" title="Export Defaulter CSV">
+        <i class="fa-solid fa-file-arrow-down"></i> Export Risk CSV
+      </a>
+      <a href="{{ url_for('ai_risk_analytics') }}" class="btn btn-primary btn-sm" title="Refresh Analytics">
+        <i class="fa-solid fa-arrows-rotate"></i> Re-calculate
+      </a>
+    </div>
+  </div>
+
+  <!-- KPI Summary Cards -->
+  <div class="stats-grid" style="margin-bottom: 2rem;">
+    
+    <div class="stat-card">
+      <div class="stat-icon icon-purple">
+        <i class="fa-solid fa-users-viewfinder"></i>
+      </div>
+      <div class="stat-info">
+        <div class="stat-value">{{ summary.total_analyzed }}</div>
+        <div class="stat-label">Students Analyzed</div>
+      </div>
+    </div>
+
+    <div class="stat-card" style="border-color: rgba(239, 68, 68, 0.35);">
+      <div class="stat-icon" style="background: rgba(239, 68, 68, 0.15); color: #ef4444;">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+      </div>
+      <div class="stat-info">
+        <div class="stat-value" style="color: #ef4444;">{{ summary.critical_count }}</div>
+        <div class="stat-label">Critical Defaulters (&lt;70%)</div>
+      </div>
+    </div>
+
+    <div class="stat-card" style="border-color: rgba(245, 158, 11, 0.35);">
+      <div class="stat-icon" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b;">
+        <i class="fa-solid fa-circle-exclamation"></i>
+      </div>
+      <div class="stat-info">
+        <div class="stat-value" style="color: #f59e0b;">{{ summary.moderate_count }}</div>
+        <div class="stat-label">At-Risk Warning (70-79%)</div>
+      </div>
+    </div>
+
+    <div class="stat-card" style="border-color: rgba(16, 185, 129, 0.35);">
+      <div class="stat-icon" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">
+        <i class="fa-solid fa-shield-halved"></i>
+      </div>
+      <div class="stat-info">
+        <div class="stat-value" style="color: #10b981;">{{ summary.safe_count }}</div>
+        <div class="stat-label">Good Standing (&ge;80%)</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Filters and Search Toolbar -->
+  <div class="card" style="padding: 1.25rem; margin-bottom: 2rem;">
+    <form method="GET" action="{{ url_for('ai_risk_analytics') }}" class="ai-filter-form">
+      
+      <div class="ai-filter-group" style="flex: 2; min-width: 220px;">
+        <label><i class="fa-solid fa-magnifying-glass"></i> Search Student</label>
+        <input type="text" name="search" class="form-control" placeholder="Search by name or roll number..." value="{{ search }}">
+      </div>
+
+      <div class="ai-filter-group" style="flex: 1; min-width: 160px;">
+        <label><i class="fa-solid fa-building"></i> Department</label>
+        <select name="dept_id" class="form-control" onchange="this.form.submit()">
+          <option value="">All Departments</option>
+          {% for d in departments %}
+            <option value="{{ d.id }}" {% if dept_filter == d.id|string %}selected{% endif %}>{{ d.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="ai-filter-group" style="flex: 1; min-width: 150px;">
+        <label><i class="fa-solid fa-layer-group"></i> Section</label>
+        <select name="section_id" class="form-control" onchange="this.form.submit()">
+          <option value="">All Sections</option>
+          {% for s in sections %}
+            <option value="{{ s.id }}" {% if sect_filter == s.id|string %}selected{% endif %}>{{ s.section_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="ai-filter-group" style="flex: 1; min-width: 160px;">
+        <label><i class="fa-solid fa-filter"></i> Risk Tier</label>
+        <select name="risk" class="form-control" onchange="this.form.submit()">
+          <option value="ALL" {% if risk_filter == 'ALL' or not risk_filter %}selected{% endif %}>All Risk Levels</option>
+          <option value="CRITICAL" {% if risk_filter == 'CRITICAL' %}selected{% endif %}>🔴 Critical Defaulters</option>
+          <option value="MODERATE" {% if risk_filter == 'MODERATE' %}selected{% endif %}>🟡 Moderate Warning</option>
+          <option value="SAFE" {% if risk_filter == 'SAFE' %}selected{% endif %}>🟢 Safe / Good Standing</option>
+        </select>
+      </div>
+
+      <div style="display: flex; gap: 0.5rem; align-items: flex-end;">
+        <button type="submit" class="btn btn-primary" style="height: 42px;">
+          <i class="fa-solid fa-filter"></i> Filter
+        </button>
+        {% if search or dept_filter or sect_filter or (risk_filter and risk_filter != 'ALL') %}
+          <a href="{{ url_for('ai_risk_analytics') }}" class="btn btn-secondary" style="height: 42px;" title="Reset filters">
+            <i class="fa-solid fa-xmark"></i>
+          </a>
+        {% endif %}
+      </div>
+
+    </form>
+  </div>
+
+  <!-- Main AI Risk Analysis Roster -->
+  <div class="card" style="padding: 1.5rem;">
+    
+    <div class="card-header" style="padding-bottom: 1.25rem; border-bottom: 1px solid var(--border-glass); margin-bottom: 1rem;">
+      <h2 class="card-title">
+        <i class="fa-solid fa-chart-line" style="color: var(--secondary);"></i> 
+        Predictive Risk Assessment &amp; Action Plan Roster
+      </h2>
+      <span style="color: var(--text-muted); font-size: 0.85rem;">
+        Tracked across {{ summary.total_sessions_tracked }} class sessions &bull; Standard 40-lecture semester horizon
+      </span>
+    </div>
+
+    {% if students %}
+      <div class="table-responsive">
+        <table class="data-table ai-data-table">
+          <thead>
+            <tr>
+              <th>Student Details</th>
+              <th>Current Rate</th>
+              <th>Semester Forecast</th>
+              <th>Risk Assessment</th>
+              <th>Momentum Trend</th>
+              <th>Prescriptive Action Plan</th>
+              <th style="text-align: right;">AI Intervention</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for st in students %}
+              <tr class="ai-row-{{ st.risk_level|lower }}">
+                
+                <!-- Student Info -->
+                <td>
+                  <div style="display: flex; align-items: center; gap: 0.75rem;">
+                    <div class="ai-avatar avatar-{{ st.risk_level|lower }}">
+                      {{ st.full_name[:1]|upper }}
+                    </div>
+                    <div>
+                      <div style="font-weight: 700; color: #ffffff; font-size: 0.95rem;">
+                        {{ st.full_name }}
+                      </div>
+                      <div style="font-size: 0.8rem; font-family: var(--font-mono); color: var(--secondary);">
+                        {{ st.roll_number }}
+                      </div>
+                      <div style="font-size: 0.75rem; color: var(--text-dim);">
+                        {{ st.department }} &bull; {{ st.section }}
+                      </div>
+                    </div>
+                  </div>
+                </td>
+
+                <!-- Current Attendance Rate -->
+                <td style="min-width: 140px;">
+                  <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.25rem;">
+                    <span class="ai-rate-val {% if st.current_pct < 75 %}text-danger{% else %}text-success{% endif %}">
+                      {{ st.current_pct }}%
+                    </span>
+                    <span style="font-size: 0.75rem; color: var(--text-muted);">
+                      {{ st.attended_count }}/{{ st.total_sessions }}
+                    </span>
+                  </div>
+                  <div class="ai-progress-bg">
+                    <div class="ai-progress-bar {% if st.current_pct < 70 %}bar-critical{% elif st.current_pct < 78 %}bar-warning{% else %}bar-safe{% endif %}" data-width="{{ st.current_pct }}"></div>
+                  </div>
+                </td>
+
+                <!-- Projected Semester Trajectory -->
+                <td>
+                  <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <span class="ai-projected-val {% if st.projected_final_pct < 75 %}text-danger{% elif st.projected_final_pct < 80 %}text-warning{% else %}text-info{% endif %}">
+                      {{ st.projected_final_pct }}%
+                    </span>
+                    {% if st.projected_final_pct < 75 %}
+                      <span class="ai-micro-tag tag-danger" title="Forecasted to fail 75% rule"><i class="fa-solid fa-circle-xmark"></i> Debar</span>
+                    {% else %}
+                      <span class="ai-micro-tag tag-success" title="Forecasted eligible for exams"><i class="fa-solid fa-circle-check"></i> Eligible</span>
+                    {% endif %}
+                  </div>
+                  <div style="font-size: 0.72rem; color: var(--text-dim); margin-top: 0.2rem;">
+                    Weighted AI forecast
+                  </div>
+                </td>
+
+                <!-- Risk Assessment Tier -->
+                <td>
+                  <div style="display: flex; flex-direction: column; gap: 0.2rem;">
+                    {% if st.risk_level == 'CRITICAL' %}
+                      <span class="badge badge-ai-critical">
+                        <i class="fa-solid fa-radiation"></i> Critical Defaulter
+                      </span>
+                    {% elif st.risk_level == 'MODERATE' %}
+                      <span class="badge badge-ai-moderate">
+                        <i class="fa-solid fa-triangle-exclamation"></i> Warning Alert
+                      </span>
+                    {% else %}
+                      <span class="badge badge-ai-safe">
+                        <i class="fa-solid fa-shield-check"></i> Good Standing
+                      </span>
+                    {% endif %}
+
+                    <div style="font-size: 0.72rem; color: var(--text-muted);">
+                      Risk Score: <strong>{{ st.risk_score }}/100</strong>
+                    </div>
+                  </div>
+                </td>
+
+                <!-- Trend / Momentum -->
+                <td>
+                  <div class="ai-trend-indicator trend-{{ st.trend_label|lower }}">
+                    <i class="fa-solid {{ st.trend_icon }}"></i> {{ st.trend_label }}
+                  </div>
+                  {% if st.current_absence_streak > 0 %}
+                    <div style="font-size: 0.72rem; color: #ef4444; margin-top: 0.2rem;">
+                      <i class="fa-solid fa-fire"></i> {{ st.current_absence_streak }} missed in a row
+                    </div>
+                  {% else %}
+                    <div style="font-size: 0.72rem; color: #10b981; margin-top: 0.2rem;">
+                      Attended last session
+                    </div>
+                  {% endif %}
+                </td>
+
+                <!-- Prescriptive AI Recommendation -->
+                <td style="max-width: 240px;">
+                  <div class="ai-recovery-box {% if st.current_pct < 75 %}box-danger{% else %}box-safe{% endif %}">
+                    <i class="fa-solid {% if st.current_pct < 75 %}fa-bolt{% else %}fa-check-double{% endif %}" style="margin-right: 0.3rem;"></i>
+                    {{ st.recovery_message }}
+                  </div>
+                  {% if st.most_missed_day != 'None' and st.current_pct < 85 %}
+                    <div style="font-size: 0.72rem; color: var(--text-dim); margin-top: 0.25rem;">
+                      <i class="fa-regular fa-calendar-xmark"></i> Most missed day: <strong>{{ st.most_missed_day }}</strong>
+                    </div>
+                  {% endif %}
+                </td>
+
+                <!-- Action Button -->
+                <td style="text-align: right;">
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="openNoticeModal('{{ st.roll_number }}')" title="Generate AI Official Warning Notice">
+                    <i class="fa-solid fa-envelope-open-text" style="color: var(--accent-purple);"></i> Notice
+                  </button>
+                </td>
+
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div style="text-align: center; padding: 3rem 1rem;">
+        <div style="font-size: 3rem; color: var(--text-dim); margin-bottom: 1rem;">
+          <i class="fa-solid fa-user-slash"></i>
+        </div>
+        <h3 style="color: #ffffff; font-weight: 700;">No Students Found</h3>
+        <p style="color: var(--text-muted); font-size: 0.95rem; margin-top: 0.25rem;">
+          Try adjusting your search criteria or risk filter above.
+        </p>
+      </div>
+    {% endif %}
+
+  </div>
+
+</div>
+
+<!-- Interactive AI Notice Generator Modal -->
+<div id="aiNoticeModal" class="ai-modal-backdrop" style="display: none;">
+  <div class="ai-modal-card">
+    
+    <div class="ai-modal-header">
+      <div style="display: flex; align-items: center; gap: 0.75rem;">
+        <div class="ai-modal-icon">
+          <i class="fa-solid fa-brain"></i>
+        </div>
+        <div>
+          <h3 style="color: #ffffff; font-size: 1.25rem; font-weight: 700;">
+            AI Academic Intervention Notice
+          </h3>
+          <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.1rem;">
+            Formal personalized communication generated for academic counseling &amp; parent notification.
+          </p>
+        </div>
+      </div>
+      <button type="button" class="ai-modal-close" onclick="closeNoticeModal()">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+
+    <div class="ai-modal-body">
+      <div id="noticeLoading" style="text-align: center; padding: 2rem;">
+        <i class="fa-solid fa-spinner fa-spin" style="font-size: 2rem; color: var(--primary);"></i>
+        <p style="margin-top: 0.75rem; color: var(--text-muted);">Generating personalized AI notice...</p>
+      </div>
+      <textarea id="noticeTextArea" class="ai-notice-textarea" readonly style="display: none;"></textarea>
+    </div>
+
+    <div class="ai-modal-footer">
+      <button type="button" class="btn btn-secondary btn-sm" onclick="closeNoticeModal()">
+        Close
+      </button>
+      <button type="button" class="btn btn-primary btn-sm" id="copyNoticeBtn" onclick="copyNoticeContent()">
+        <i class="fa-solid fa-copy"></i> Copy to Clipboard
+      </button>
+      <button type="button" class="btn btn-primary btn-sm" style="background: linear-gradient(135deg, #10b981, #059669);" onclick="printNotice()">
+        <i class="fa-solid fa-print"></i> Print / Save PDF
+      </button>
+    </div>
+
+  </div>
+</div>
+
+<script>
+function openNoticeModal(rollNumber) {
+  const modal = document.getElementById('aiNoticeModal');
+  const loading = document.getElementById('noticeLoading');
+  const textarea = document.getElementById('noticeTextArea');
+  const copyBtn = document.getElementById('copyNoticeBtn');
+  
+  modal.style.display = 'flex';
+  loading.style.display = 'block';
+  textarea.style.display = 'none';
+  copyBtn.innerHTML = '<i class="fa-solid fa-copy"></i> Copy to Clipboard';
+
+  fetch(`/api/ai-generate-notice`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ roll_number: rollNumber })
+  })
+  .then(res => res.json())
+  .then(data => {
+    loading.style.display = 'none';
+    if (data.notice) {
+      textarea.value = data.notice;
+      textarea.style.display = 'block';
+    } else {
+      textarea.value = 'Failed to generate notice: ' + (data.error || 'Unknown error');
+      textarea.style.display = 'block';
+    }
+  })
+  .catch(err => {
+    loading.style.display = 'none';
+    textarea.value = 'Network error while generating notice.';
+    textarea.style.display = 'block';
+  });
+}
+
+function closeNoticeModal() {
+  document.getElementById('aiNoticeModal').style.display = 'none';
+}
+
+function copyNoticeContent() {
+  const textarea = document.getElementById('noticeTextArea');
+  textarea.select();
+  textarea.setSelectionRange(0, 99999);
+  navigator.clipboard.writeText(textarea.value).then(() => {
+    const copyBtn = document.getElementById('copyNoticeBtn');
+    copyBtn.innerHTML = '<i class="fa-solid fa-check"></i> Copied!';
+    setTimeout(() => {
+      copyBtn.innerHTML = '<i class="fa-solid fa-copy"></i> Copy to Clipboard';
+    }, 2500);
+  });
+}
+
+function printNotice() {
+  const content = document.getElementById('noticeTextArea').value;
+  const printWindow = window.open('', '', 'height=600,width=800');
+  printWindow.document.write('<html><head><title>Academic Notice</title><style>');
+  printWindow.document.write('body { font-family: monospace; white-space: pre-wrap; padding: 20px; line-height: 1.4; }');
+  printWindow.document.write('</style></head><body>');
+  printWindow.document.write(content);
+  printWindow.document.write('</body></html>');
+  printWindow.document.close();
+  printWindow.focus();
+  printWindow.print();
+}
+
+// Close on backdrop click or ESC key
+window.addEventListener('click', function(e) {
+  const modal = document.getElementById('aiNoticeModal');
+  if (e.target === modal) {
+    closeNoticeModal();
+  }
+});
+window.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    closeNoticeModal();
+  }
+});
+
+// Initialize dynamic progress bar widths
+document.addEventListener('DOMContentLoaded', function() {
+  document.querySelectorAll('.ai-progress-bar[data-width]').forEach(function(bar) {
+    const width = parseFloat(bar.getAttribute('data-width')) || 0;
+    bar.style.width = Math.min(100, Math.max(0, width)) + '%';
+  });
+});
+</script>
+
+{% endblock %}

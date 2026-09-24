@@ -1,0 +1,416 @@
+{% extends 'base.html' %}
+
+{% block title %}Apply for Leave - AI Attendance Impact Predictor{% endblock %}
+
+{% block content %}
+<div class="container container-narrow">
+  
+  <!-- Header -->
+  <div class="ai-header-bar">
+    <div>
+      <div class="ai-chip">
+        <i class="fa-solid fa-brain-circuit"></i> AI Leave Management
+      </div>
+      <h1 class="ai-title">
+        Apply for Student Leave
+      </h1>
+      <p class="ai-subtitle">
+        Timetable-aware class impact forecasting, natural language extraction, and academic recovery planning.
+      </p>
+    </div>
+
+    <div class="ai-action-buttons">
+      <a href="{{ url_for('student_simulator') }}" class="btn btn-secondary btn-sm">
+        <i class="fa-solid fa-sliders"></i> Simulator
+      </a>
+      <a href="{{ url_for('student_leave_history') }}" class="btn btn-primary btn-sm">
+        <i class="fa-solid fa-clock-rotate-left"></i> My Leaves
+      </a>
+    </div>
+  </div>
+
+  <!-- Student Current Standing Header Card -->
+  <div class="card" style="padding: 1.25rem 1.5rem; margin-bottom: 1.5rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+      <div style="display: flex; align-items: center; gap: 1rem;">
+        <div class="ai-avatar avatar-safe" style="width: 44px; height: 44px; font-size: 1.2rem;">
+          {{ student.full_name[:1]|upper if student.full_name else 'S' }}
+        </div>
+        <div>
+          <div style="font-weight: 800; color: #ffffff; font-size: 1.05rem;">
+            {{ student.full_name }}
+          </div>
+          <div style="font-size: 0.8rem; color: var(--text-muted); font-family: var(--font-mono);">
+            {{ student.roll_number }} &bull; {{ student.dept_name or student.department or 'General' }} ({{ student.section_name or student.section or 'Sec A' }})
+          </div>
+        </div>
+      </div>
+
+      <div style="display: flex; gap: 1.5rem; align-items: center;">
+        <div>
+          <div style="font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase;">Current Attendance</div>
+          <div style="font-size: 1.3rem; font-weight: 800; color: {% if att_summary.current_pct < threshold %}#ef4444{% else %}#10b981{% endif %};">
+            {{ att_summary.current_pct }}%
+          </div>
+        </div>
+        <div>
+          <div style="font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase;">Classes Attended</div>
+          <div style="font-size: 1.1rem; font-weight: 700; color: #ffffff;">
+            {{ att_summary.attended }}/{{ att_summary.conducted }}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dual Mode Tab Controls -->
+  <div class="tab-controls">
+    <button type="button" class="tab-btn active" id="tabFormBtn" onclick="switchMode('form')">
+      <i class="fa-solid fa-file-signature"></i> Standard Form
+    </button>
+    <button type="button" class="tab-btn" id="tabAiBtn" onclick="switchMode('ai')">
+      <i class="fa-solid fa-wand-magic-sparkles"></i> Natural Language AI Apply
+    </button>
+  </div>
+
+  <!-- Mode 1: Standard Application Form -->
+  <div id="standardFormCard" class="card" style="padding: 2rem;">
+    <form method="POST" action="{{ url_for('apply_leave') }}" enctype="multipart/form-data" id="leaveApplicationForm">
+      <input type="hidden" name="applied_via" id="applied_via" value="form">
+      {% if session.get('role') in ['admin', 'teacher', 'hod'] %}
+        <div class="form-group">
+          <label class="form-label">Student Roll Number (Staff Override)</label>
+          <input type="text" name="roll_number" class="form-control" value="{{ student.roll_number }}" id="inputRollNumber" onchange="fetchImpactPreview()">
+        </div>
+      {% endif %}
+
+      <div class="form-group">
+        <label class="form-label" for="leave_type_id"><i class="fa-solid fa-tag"></i> Leave Category *</label>
+        <select name="leave_type_id" id="leave_type_id" class="form-control" required onchange="fetchImpactPreview()">
+          <option value="">-- Select Leave Category --</option>
+          {% for lt in leave_types %}
+            <option value="{{ lt.id }}" data-max="{{ lt.max_days }}" data-doc="{{ lt.requires_document }}" data-code="{{ lt.code }}">
+              {{ lt.name }} (Max: {{ lt.max_days }} days{{ ' • Requires Doc' if lt.requires_document else '' }})
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+        <div class="form-group">
+          <label class="form-label" for="start_date"><i class="fa-solid fa-calendar-day"></i> Start Date *</label>
+          <input type="date" name="start_date" id="start_date" class="form-control" required onchange="fetchImpactPreview()">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="end_date"><i class="fa-solid fa-calendar-day"></i> End Date *</label>
+          <input type="date" name="end_date" id="end_date" class="form-control" required onchange="fetchImpactPreview()">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="reason"><i class="fa-solid fa-heading"></i> Primary Reason *</label>
+        <input type="text" name="reason" id="reason" class="form-control" placeholder="e.g. Viral fever / Family emergency / Hackathon attendance" required>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="description"><i class="fa-solid fa-align-left"></i> Detailed Explanation (Optional)</label>
+        <textarea name="description" id="description" class="form-control" rows="3" placeholder="Provide additional relevant details or notes for faculty/HOD review..."></textarea>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="document">
+          <i class="fa-solid fa-paperclip"></i> Supporting Document (Medical Certificate / Official Duty Letter)
+        </label>
+        <input type="file" name="document" id="document" class="form-control" accept=".pdf,.png,.jpg,.jpeg,.webp">
+        <small style="color: var(--text-dim); display: block; margin-top: 0.35rem;">
+          Supported formats: PDF, PNG, JPG, JPEG (Max 10MB). OCR assisted verification will process the document.
+        </small>
+      </div>
+
+      <!-- Real-Time AI Impact Calculation Preview Card -->
+      <div id="impactPreviewContainer" class="leave-impact-box" style="display: none;">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-glass); padding-bottom: 0.75rem;">
+          <div style="font-weight: 800; color: #ffffff; font-size: 0.95rem; display: flex; align-items: center; gap: 0.5rem;">
+            <i class="fa-solid fa-brain" style="color: var(--secondary);"></i>
+            Pre-Submission Attendance Impact Forecast
+          </div>
+          <div id="previewRiskBadge" class="badge"></div>
+        </div>
+
+        <div class="impact-metric-grid">
+          <div class="impact-metric-card">
+            <div class="impact-metric-val text-info" id="prevAffected">0</div>
+            <div class="impact-metric-lbl">Scheduled Classes Missed</div>
+          </div>
+          <div class="impact-metric-card">
+            <div class="impact-metric-val" id="prevCurrent">0%</div>
+            <div class="impact-metric-lbl">Current Rate</div>
+          </div>
+          <div class="impact-metric-card">
+            <div class="impact-metric-val" id="prevProjected">0%</div>
+            <div class="impact-metric-lbl">Projected After Leave</div>
+          </div>
+          <div class="impact-metric-card">
+            <div class="impact-metric-val text-warning" id="prevDrop">0%</div>
+            <div class="impact-metric-lbl">Attendance Drop</div>
+          </div>
+        </div>
+
+        <div id="previewAlertMessage" style="margin-top: 1rem; font-size: 0.85rem; padding: 0.75rem; border-radius: var(--radius-sm); font-weight: 600;"></div>
+
+        <!-- Subject-Wise Impact Breakdown -->
+        <div id="subjectImpactSection" style="margin-top: 1rem;">
+          <div style="font-size: 0.82rem; font-weight: 700; color: var(--text-muted); margin-bottom: 0.5rem;">
+            <i class="fa-solid fa-table-list"></i> Subject-Wise Timetable Impact:
+          </div>
+          <div class="table-responsive">
+            <table class="data-table" style="font-size: 0.8rem;">
+              <thead>
+                <tr>
+                  <th>Subject</th>
+                  <th>Current %</th>
+                  <th>Missed Slots</th>
+                  <th>Projected %</th>
+                  <th>Risk Tier</th>
+                </tr>
+              </thead>
+              <tbody id="subjectImpactTbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-block btn-lg" style="margin-top: 1.75rem;">
+        <i class="fa-solid fa-paper-plane"></i> Submit Leave Application
+      </button>
+    </form>
+  </div>
+
+  <!-- Mode 2: Natural Language AI Application -->
+  <div id="aiExtractionCard" class="card" style="padding: 2rem; display: none;">
+    <div style="display: flex; gap: 0.75rem; align-items: center; margin-bottom: 1.25rem;">
+      <div class="ai-avatar avatar-safe" style="width: 40px; height: 40px;">
+        <i class="fa-solid fa-wand-magic-sparkles"></i>
+      </div>
+      <div>
+        <h3 style="color: #ffffff; font-size: 1.15rem; font-weight: 700;">AI Natural Language Leave Parser</h3>
+        <p style="color: var(--text-muted); font-size: 0.85rem;">
+          Describe your leave requirement in plain English. The AI engine will extract dates, classify the category, and calculate impact.
+        </p>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <textarea id="nlInputText" class="form-control" rows="4" placeholder="Example: I need leave from 21 September to 24 September because I am unwell with viral fever..."></textarea>
+    </div>
+
+    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1.25rem;">
+      <span style="font-size: 0.75rem; color: var(--text-dim);">Quick Examples:</span>
+      <button type="button" class="prompt-chip" onclick="setNlExample('I need medical leave from tomorrow till Friday due to severe fever and doctor advice.')">Medical (tomorrow till Fri)</button>
+      <button type="button" class="prompt-chip" onclick="setNlExample('Applying for casual leave for 3 days starting 2026-10-05 to attend my sister wedding in hometown.')">Casual (Wedding)</button>
+      <button type="button" class="prompt-chip" onclick="setNlExample('Requesting academic duty leave from 12 October to 15 October to participate in the National Hackathon.')">Hackathon Duty</button>
+    </div>
+
+    <button type="button" class="btn btn-primary" onclick="processAiExtraction()">
+      <i class="fa-solid fa-bolt"></i> Extract &amp; Analyze with AI
+    </button>
+
+    <div id="aiLoading" style="display: none; text-align: center; padding: 2rem;">
+      <i class="fa-solid fa-spinner fa-spin" style="font-size: 2rem; color: var(--primary);"></i>
+      <p style="margin-top: 0.75rem; color: var(--text-muted); font-size: 0.9rem;">Extracting parameters &amp; calculating timetable impact...</p>
+    </div>
+
+    <!-- AI Extracted Result Confirmation Box -->
+    <div id="aiResultBox" style="display: none; margin-top: 1.75rem; background: #0c111e; border: 1px solid rgba(99, 102, 241, 0.4); border-radius: var(--radius-md); padding: 1.5rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-glass); padding-bottom: 0.75rem; margin-bottom: 1rem;">
+        <span style="font-weight: 800; color: #a5b4fc; font-size: 0.95rem;"><i class="fa-solid fa-circle-check"></i> Extracted Structured Leave Information</span>
+        <span class="badge badge-ai-safe">AI Confidence: High</span>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; font-size: 0.88rem; margin-bottom: 1.25rem;">
+        <div><strong>Category:</strong> <span id="aiExtCategory" style="color: #ffffff;"></span></div>
+        <div><strong>Duration:</strong> <span id="aiExtDuration" style="color: #ffffff;"></span></div>
+        <div><strong>Start Date:</strong> <span id="aiExtStart" style="color: #38bdf8;"></span></div>
+        <div><strong>End Date:</strong> <span id="aiExtEnd" style="color: #38bdf8;"></span></div>
+        <div style="grid-column: span 2;"><strong>Extracted Reason:</strong> <span id="aiExtReason" style="color: #ffffff;"></span></div>
+      </div>
+
+      <div style="text-align: right; display: flex; justify-content: flex-end; gap: 0.75rem;">
+        <button type="button" class="btn btn-secondary btn-sm" onclick="switchMode('form')">
+          Edit in Standard Form
+        </button>
+        <button type="button" class="btn btn-primary btn-sm" onclick="applyAndSubmitAiExtraction()">
+          <i class="fa-solid fa-check"></i> Confirm &amp; Load into Application
+        </button>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function switchMode(mode) {
+  const formCard = document.getElementById('standardFormCard');
+  const aiCard = document.getElementById('aiExtractionCard');
+  const formBtn = document.getElementById('tabFormBtn');
+  const aiBtn = document.getElementById('tabAiBtn');
+  const appliedViaInput = document.getElementById('applied_via');
+
+  if (mode === 'ai') {
+    formCard.style.display = 'none';
+    aiCard.style.display = 'block';
+    aiBtn.classList.add('active');
+    formBtn.classList.remove('active');
+    appliedViaInput.value = 'ai_nlp';
+  } else {
+    formCard.style.display = 'block';
+    aiCard.style.display = 'none';
+    formBtn.classList.add('active');
+    aiBtn.classList.remove('active');
+    appliedViaInput.value = 'form';
+  }
+}
+
+function setNlExample(text) {
+  document.getElementById('nlInputText').value = text;
+}
+
+function processAiExtraction() {
+  const text = document.getElementById('nlInputText').value.trim();
+  if (!text) {
+    alert('Please enter your leave request in the text box.');
+    return;
+  }
+
+  const loading = document.getElementById('aiLoading');
+  const resultBox = document.getElementById('aiResultBox');
+  loading.style.display = 'block';
+  resultBox.style.display = 'none';
+
+  fetch('/api/ai/extract-leave', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: text })
+  })
+  .then(res => res.json())
+  .then(data => {
+    loading.style.display = 'none';
+    if (data.success && data.extracted) {
+      window.lastAiExtracted = data;
+      document.getElementById('aiExtCategory').textContent = data.extracted.leave_type_name;
+      document.getElementById('aiExtDuration').textContent = data.extracted.total_days + ' day(s)';
+      document.getElementById('aiExtStart').textContent = data.extracted.start_date;
+      document.getElementById('aiExtEnd').textContent = data.extracted.end_date;
+      document.getElementById('aiExtReason').textContent = data.extracted.reason;
+      resultBox.style.display = 'block';
+    } else {
+      alert('Could not extract details: ' + (data.error || 'Please refine your description.'));
+    }
+  })
+  .catch(err => {
+    loading.style.display = 'none';
+    alert('Network error while extracting leave.');
+  });
+}
+
+function applyAndSubmitAiExtraction() {
+  if (!window.lastAiExtracted) return;
+  const ext = window.lastAiExtracted.extracted;
+  
+  // Populate standard form
+  if (ext.leave_type_id) {
+    document.getElementById('leave_type_id').value = ext.leave_type_id;
+  }
+  document.getElementById('start_date').value = ext.start_date;
+  document.getElementById('end_date').value = ext.end_date;
+  document.getElementById('reason').value = ext.reason;
+  document.getElementById('description').value = ext.description;
+
+  switchMode('form');
+  fetchImpactPreview();
+  window.scrollTo({ top: document.getElementById('impactPreviewContainer').offsetTop - 100, behavior: 'smooth' });
+}
+
+function fetchImpactPreview() {
+  const rollInput = document.getElementById('inputRollNumber');
+  const roll = rollInput ? rollInput.value.trim() : '{{ student.roll_number }}';
+  const start = document.getElementById('start_date').value;
+  const end = document.getElementById('end_date').value;
+  const typeId = document.getElementById('leave_type_id').value;
+
+  if (!start || !end) return;
+
+  fetch('/api/attendance/impact-preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      roll_number: roll,
+      start_date: start,
+      end_date: end,
+      leave_type_id: typeId
+    })
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.impact) {
+      renderImpactPreview(data.impact, data.subject_impacts);
+    }
+  })
+  .catch(err => console.error(err));
+}
+
+function renderImpactPreview(imp, subjects) {
+  const container = document.getElementById('impactPreviewContainer');
+  container.style.display = 'block';
+
+  document.getElementById('prevAffected').textContent = imp.affected_classes;
+  document.getElementById('prevCurrent').textContent = imp.current_attendance_pct + '%';
+  document.getElementById('prevProjected').textContent = imp.projected_attendance_pct + '%';
+  document.getElementById('prevDrop').textContent = '-' + imp.percentage_drop + '%';
+
+  const riskBadge = document.getElementById('previewRiskBadge');
+  riskBadge.className = 'badge ' + imp.risk_badge;
+  riskBadge.textContent = imp.risk_label;
+
+  const alertBox = document.getElementById('previewAlertMessage');
+  if (imp.risk_level === 'HIGH_RISK') {
+    alertBox.style.background = 'rgba(239, 68, 68, 0.15)';
+    alertBox.style.color = '#fca5a5';
+    alertBox.style.border = '1px solid rgba(239, 68, 68, 0.4)';
+  } else if (imp.risk_level === 'WARNING') {
+    alertBox.style.background = 'rgba(245, 158, 11, 0.15)';
+    alertBox.style.color = '#fde68a';
+    alertBox.style.border = '1px solid rgba(245, 158, 11, 0.4)';
+  } else {
+    alertBox.style.background = 'rgba(16, 185, 129, 0.15)';
+    alertBox.style.color = '#a7f3d0';
+    alertBox.style.border = '1px solid rgba(16, 185, 129, 0.4)';
+  }
+  alertBox.textContent = imp.risk_message;
+
+  // Render subject breakdown
+  const tbody = document.getElementById('subjectImpactTbody');
+  tbody.innerHTML = '';
+  if (subjects && subjects.length > 0) {
+    subjects.forEach(s => {
+      const tr = document.createElement('tr');
+      const badgeCls = s.risk_level === 'HIGH_RISK' ? 'badge-status-rejected' : (s.risk_level === 'WARNING' ? 'badge-status-pending-faculty' : 'badge-status-approved');
+      tr.innerHTML = `
+        <td><strong>${s.course_code}</strong> - ${s.course_name}</td>
+        <td>${s.current_pct}%</td>
+        <td style="color: #f59e0b; font-weight: 700;">${s.classes_affected}</td>
+        <td style="font-weight: 800; color: ${s.projected_pct < 75 ? '#ef4444' : '#10b981'};">${s.projected_pct}%</td>
+        <td><span class="badge ${badgeCls}">${s.risk_level}</span></td>
+      `;
+      tbody.appendChild(tr);
+    });
+    document.getElementById('subjectImpactSection').style.display = 'block';
+  } else {
+    document.getElementById('subjectImpactSection').style.display = 'none';
+  }
+}
+</script>
+{% endblock %}

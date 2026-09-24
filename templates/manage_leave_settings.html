@@ -1,0 +1,410 @@
+{% extends 'base.html' %}
+
+{% block title %}Admin Leave &amp; Timetable Settings{% endblock %}
+
+{% block content %}
+<div class="container container-wide">
+
+  <!-- Header -->
+  <div class="ai-header-bar">
+    <div>
+      <div class="ai-chip">
+        <i class="fa-solid fa-gear"></i> System Administration
+      </div>
+      <h1 class="ai-title">
+        Leave &amp; Timetable System Configuration
+      </h1>
+      <p class="ai-subtitle">
+        Configure institutional attendance thresholds, dynamic leave categories, weekly timetable schedules, and academic calendar holidays.
+      </p>
+    </div>
+
+    <div class="ai-action-buttons">
+      <a href="{{ url_for('admin_dashboard') }}" class="btn btn-secondary btn-sm">
+        <i class="fa-solid fa-user-shield"></i> Admin Hub
+      </a>
+      <a href="{{ url_for('faculty_leave_dashboard') }}" class="btn btn-primary btn-sm">
+        <i class="fa-solid fa-clipboard-check"></i> Leave Hub
+      </a>
+    </div>
+  </div>
+
+  <!-- Settings Nav Tabs -->
+  <div class="tab-controls" style="margin-bottom: 2rem;">
+    <button type="button" class="tab-btn {% if not tab or tab == 'thresholds' %}active{% endif %}" onclick="showTab('thresholds')">
+      <i class="fa-solid fa-sliders"></i> System Thresholds
+    </button>
+    <button type="button" class="tab-btn {% if tab == 'types' %}active{% endif %}" onclick="showTab('types')">
+      <i class="fa-solid fa-tags"></i> Leave Categories
+    </button>
+    <button type="button" class="tab-btn {% if tab == 'timetable' %}active{% endif %}" onclick="showTab('timetable')">
+      <i class="fa-solid fa-calendar-days"></i> Class Timetable
+    </button>
+    <button type="button" class="tab-btn {% if tab == 'holidays' %}active{% endif %}" onclick="showTab('holidays')">
+      <i class="fa-solid fa-calendar-xmark"></i> Academic Holidays
+    </button>
+    <button type="button" class="tab-btn {% if tab == 'audit' %}active{% endif %}" onclick="showTab('audit')">
+      <i class="fa-solid fa-shield-halved"></i> Audit Trail
+    </button>
+  </div>
+
+  <!-- Tab 1: System Thresholds & Rules -->
+  <div id="tab-thresholds" class="settings-tab-pane" style="display: {% if not tab or tab == 'thresholds' %}block{% else %}none{% endif %};">
+    <div class="card" style="padding: 2rem;">
+      <h3 style="color: #ffffff; font-size: 1.25rem; font-weight: 700; margin-bottom: 0.5rem;">
+        <i class="fa-solid fa-sliders" style="color: var(--primary);"></i> Attendance Rules &amp; Approval Thresholds
+      </h3>
+      <p style="color: var(--text-muted); font-size: 0.88rem; margin-bottom: 1.5rem;">
+        These institutional parameters govern AI risk classifications, eligibility alerts, and automatic HOD escalation.
+      </p>
+
+      <form method="POST" action="{{ url_for('update_leave_thresholds') }}">
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem;">
+          <div class="form-group">
+            <label class="form-label" for="attendance_threshold">
+              <i class="fa-solid fa-percent"></i> Mandatory Minimum Attendance Threshold (%)
+            </label>
+            <input type="number" step="0.1" min="1" max="100" name="attendance_threshold" id="attendance_threshold" class="form-control" value="{{ threshold }}" required>
+            <small style="color: var(--text-dim); display: block; margin-top: 0.35rem;">
+              University benchmark below which students are classified as Critical Defaulters (Default: 75.0%).
+            </small>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="hod_approval_days_threshold">
+              <i class="fa-solid fa-user-clock"></i> Mandatory HOD Approval Duration Threshold (Days)
+            </label>
+            <input type="number" min="1" max="30" name="hod_approval_days_threshold" id="hod_approval_days_threshold" class="form-control" value="{{ hod_threshold }}" required>
+            <small style="color: var(--text-dim); display: block; margin-top: 0.35rem;">
+              Leave applications requesting more than this number of days automatically escalate to the HOD (Default: 3 days).
+            </small>
+          </div>
+        </div>
+
+        <div class="form-group" style="background: rgba(0,0,0,0.25); padding: 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border-glass);">
+          <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer; color: #ffffff; font-weight: 600;">
+            <input type="checkbox" name="duty_leave_counts_as_present" value="1" {% if duty_comp == '1' %}checked{% endif %} style="width: 18px; height: 18px;">
+            <span>Compensate Academic / Duty Leaves (Treat as Attended in Projections)</span>
+          </label>
+          <small style="color: var(--text-muted); display: block; margin-left: 1.9rem; margin-top: 0.25rem;">
+            When enabled, officially approved Duty/Academic leaves will not penalize the student's attendance percentage forecast.
+          </small>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-md" style="margin-top: 1rem;">
+          <i class="fa-solid fa-floppy-disk"></i> Save System Thresholds
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Tab 2: Leave Categories Manager -->
+  <div id="tab-types" class="settings-tab-pane" style="display: {% if tab == 'types' %}block{% else %}none{% endif %};">
+    
+    <!-- Add New Type -->
+    <div class="card" style="padding: 1.75rem; margin-bottom: 2rem;">
+      <h3 style="color: #ffffff; font-size: 1.15rem; font-weight: 700; margin-bottom: 1rem;">
+        <i class="fa-solid fa-plus-circle" style="color: var(--secondary);"></i> Create New Leave Category
+      </h3>
+      <form method="POST" action="{{ url_for('add_leave_type') }}">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+          <div class="form-group">
+            <label class="form-label">Category Name *</label>
+            <input type="text" name="name" class="form-control" placeholder="e.g. Sports Leave" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Short Code *</label>
+            <input type="text" name="code" class="form-control" placeholder="e.g. SPRT" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Max Allowed Days</label>
+            <input type="number" name="max_days" class="form-control" value="7" min="1" max="60" required>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 1.5rem; margin-top: 0.75rem; margin-bottom: 1rem;">
+          <label style="display: flex; align-items: center; gap: 0.5rem; color: #ffffff; font-size: 0.85rem; cursor: pointer;">
+            <input type="checkbox" name="requires_document" value="1"> Requires Supporting Document
+          </label>
+          <label style="display: flex; align-items: center; gap: 0.5rem; color: #ffffff; font-size: 0.85rem; cursor: pointer;">
+            <input type="checkbox" name="requires_hod_approval" value="1"> Always Requires HOD Approval
+          </label>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-sm"><i class="fa-solid fa-plus"></i> Add Category</button>
+      </form>
+    </div>
+
+    <!-- Active Categories List -->
+    <div class="card" style="padding: 1.5rem;">
+      <h3 style="color: #ffffff; font-size: 1.15rem; font-weight: 700; margin-bottom: 1rem;">
+        <i class="fa-solid fa-tags" style="color: var(--primary);"></i> Configured Categories
+      </h3>
+      <div class="table-responsive">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Category Name</th>
+              <th>Code</th>
+              <th>Max Days</th>
+              <th>Doc Required</th>
+              <th>HOD Mandate</th>
+              <th>Status</th>
+              <th style="text-align: right;">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for lt in leave_types %}
+              <tr>
+                <td><strong>{{ lt.name }}</strong></td>
+                <td><code style="color: var(--secondary);">{{ lt.code }}</code></td>
+                <td>{{ lt.max_days }} days</td>
+                <td>{{ '✅ Yes' if lt.requires_document else '❌ No' }}</td>
+                <td>{{ '🏛️ Yes' if lt.requires_hod_approval else '👨‍🏫 Faculty' }}</td>
+                <td>
+                  <span class="badge {{ 'badge-status-approved' if lt.is_active else 'badge-status-rejected' }}">
+                    {{ 'Active' if lt.is_active else 'Disabled' }}
+                  </span>
+                </td>
+                <td style="text-align: right;">
+                  <form method="POST" action="{{ url_for('toggle_leave_type', type_id=lt.id) }}" style="display: inline;">
+                    <button type="submit" class="btn btn-secondary btn-sm" style="font-size: 0.75rem;">
+                      {{ 'Disable' if lt.is_active else 'Enable' }}
+                    </button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Tab 3: Timetable Management -->
+  <div id="tab-timetable" class="settings-tab-pane" style="display: {% if tab == 'timetable' %}block{% else %}none{% endif %};">
+    
+    <!-- Add Slot Form -->
+    <div class="card" style="padding: 1.75rem; margin-bottom: 2rem;">
+      <h3 style="color: #ffffff; font-size: 1.15rem; font-weight: 700; margin-bottom: 1rem;">
+        <i class="fa-solid fa-plus-circle" style="color: var(--secondary);"></i> Add Weekly Timetable Slot
+      </h3>
+      <form method="POST" action="{{ url_for('manage_timetable') }}">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem;">
+          
+          <div class="form-group">
+            <label class="form-label">Course *</label>
+            <select name="course_id" class="form-control" required>
+              <option value="">-- Select Course --</option>
+              {% for c in courses %}
+                <option value="{{ c.id }}">{{ c.course_code }} - {{ c.course_name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Section *</label>
+            <select name="section_id" class="form-control" required>
+              <option value="">-- Select Section --</option>
+              {% for s in sections %}
+                <option value="{{ s.id }}">{{ s.section_name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Day of Week *</label>
+            <select name="day_of_week" class="form-control" required>
+              <option value="Monday">Monday</option>
+              <option value="Tuesday">Tuesday</option>
+              <option value="Wednesday">Wednesday</option>
+              <option value="Thursday">Thursday</option>
+              <option value="Friday">Friday</option>
+              <option value="Saturday">Saturday</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Start Time *</label>
+            <input type="time" name="start_time" class="form-control" value="09:00" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">End Time *</label>
+            <input type="time" name="end_time" class="form-control" value="10:00" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Room / Hall</label>
+            <input type="text" name="room" class="form-control" placeholder="e.g. Hall A-102">
+          </div>
+
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-sm" style="margin-top: 0.5rem;">
+          <i class="fa-solid fa-plus"></i> Save Schedule Slot
+        </button>
+      </form>
+    </div>
+
+    <!-- Timetable Slots Table -->
+    <div class="card" style="padding: 1.5rem;">
+      <h3 style="color: #ffffff; font-size: 1.15rem; font-weight: 700; margin-bottom: 1rem;">
+        <i class="fa-solid fa-calendar-days" style="color: var(--primary);"></i> Weekly Class Timetable ({{ timetable|length }} slots)
+      </h3>
+      {% if timetable %}
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Day</th>
+                <th>Course</th>
+                <th>Section</th>
+                <th>Time Window</th>
+                <th>Room</th>
+                <th>Assigned Instructor</th>
+                <th style="text-align: right;">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for t in timetable %}
+                <tr>
+                  <td><strong>{{ t.day_of_week }}</strong></td>
+                  <td>{{ t.course_code }} - {{ t.course_name }}</td>
+                  <td>{{ t.section_name }}</td>
+                  <td><code style="color: #38bdf8;">{{ t.start_time }} &rarr; {{ t.end_time }}</code></td>
+                  <td>{{ t.room or 'Main Hall' }}</td>
+                  <td>{{ t.teacher_name or 'Unassigned' }}</td>
+                  <td style="text-align: right;">
+                    <form method="POST" action="{{ url_for('delete_timetable_slot', slot_id=t.id) }}" style="display: inline;" onsubmit="return confirm('Delete this slot?')">
+                      <button type="submit" class="btn btn-secondary btn-sm" style="color: #ef4444;"><i class="fa-solid fa-trash"></i></button>
+                    </form>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p style="color: var(--text-muted); padding: 1rem;">No timetable slots configured yet. Use the form above to add weekly lecture slots.</p>
+      {% endif %}
+    </div>
+
+  </div>
+
+  <!-- Tab 4: Academic Holidays & Calendar -->
+  <div id="tab-holidays" class="settings-tab-pane" style="display: {% if tab == 'holidays' %}block{% else %}none{% endif %};">
+    
+    <div class="card" style="padding: 1.75rem; margin-bottom: 2rem;">
+      <h3 style="color: #ffffff; font-size: 1.15rem; font-weight: 700; margin-bottom: 1rem;">
+        <i class="fa-solid fa-plus-circle" style="color: var(--secondary);"></i> Add Official Holiday / Non-Working Event
+      </h3>
+      <form method="POST" action="{{ url_for('manage_holidays') }}">
+        <div style="display: grid; grid-template-columns: 1fr 2fr auto; gap: 1rem; align-items: flex-end;">
+          <div class="form-group">
+            <label class="form-label">Event Date *</label>
+            <input type="date" name="event_date" class="form-control" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Holiday / Event Title *</label>
+            <input type="text" name="title" class="form-control" placeholder="e.g. University Foundation Day / National Holiday" required>
+          </div>
+          <div class="form-group">
+            <button type="submit" class="btn btn-primary" style="height: 42px;"><i class="fa-solid fa-plus"></i> Save Event</button>
+          </div>
+        </div>
+      </form>
+    </div>
+
+    <div class="card" style="padding: 1.5rem;">
+      <h3 style="color: #ffffff; font-size: 1.15rem; font-weight: 700; margin-bottom: 1rem;">
+        <i class="fa-solid fa-calendar-xmark" style="color: var(--primary);"></i> Academic Calendar Holidays
+      </h3>
+      {% if holidays %}
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Title / Description</th>
+                <th>Type</th>
+                <th style="text-align: right;">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for h in holidays %}
+                <tr>
+                  <td><strong style="font-family: var(--font-mono); color: #ffffff;">{{ h.event_date }}</strong></td>
+                  <td>{{ h.title }}</td>
+                  <td><span class="badge badge-status-rejected">Official Holiday (No Lectures)</span></td>
+                  <td style="text-align: right;">
+                    <form method="POST" action="{{ url_for('delete_holiday', holiday_id=h.id) }}" style="display: inline;" onsubmit="return confirm('Delete holiday?')">
+                      <button type="submit" class="btn btn-secondary btn-sm" style="color: #ef4444;"><i class="fa-solid fa-trash"></i></button>
+                    </form>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p style="color: var(--text-muted); padding: 1rem;">No holidays configured in the academic calendar.</p>
+      {% endif %}
+    </div>
+
+  </div>
+
+  <!-- Tab 5: Audit Trail Logs -->
+  <div id="tab-audit" class="settings-tab-pane" style="display: {% if tab == 'audit' %}block{% else %}none{% endif %};">
+    <div class="card" style="padding: 1.5rem;">
+      <h3 style="color: #ffffff; font-size: 1.15rem; font-weight: 700; margin-bottom: 1rem;">
+        <i class="fa-solid fa-shield-halved" style="color: var(--secondary);"></i> Institutional Action &amp; Workflow Audit Trail
+      </h3>
+      <div class="table-responsive">
+        <table class="data-table" style="font-size: 0.8rem;">
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>User</th>
+              <th>Action</th>
+              <th>Target Record</th>
+              <th>Details</th>
+              <th>IP Address</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for log in audit_logs %}
+              <tr>
+                <td style="font-family: var(--font-mono); color: var(--text-dim);">{{ log.timestamp }}</td>
+                <td><strong>{{ log.username or 'System' }}</strong></td>
+                <td><code style="color: var(--secondary);">{{ log.action }}</code></td>
+                <td>{{ log.target_type }} #{{ log.target_id or '-' }}</td>
+                <td>{{ log.details or '-' }}</td>
+                <td style="font-family: var(--font-mono); color: var(--text-dim);">{{ log.ip_address or 'Local' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function showTab(tabName) {
+  document.querySelectorAll('.settings-tab-pane').forEach(el => el.style.display = 'none');
+  document.querySelectorAll('.tab-controls .tab-btn').forEach(el => el.classList.remove('active'));
+
+  const targetPane = document.getElementById('tab-' + tabName);
+  if (targetPane) targetPane.style.display = 'block';
+
+  // Highlight matching tab button
+  event.currentTarget.classList.add('active');
+}
+</script>
+{% endblock %}

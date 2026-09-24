@@ -1,0 +1,214 @@
+{% extends 'base.html' %}
+
+{% block title %}HOD Leave &amp; Retention Hub{% endblock %}
+
+{% block content %}
+<div class="container container-wide">
+
+  <!-- Header -->
+  <div class="ai-header-bar">
+    <div>
+      <div class="ai-chip">
+        <i class="fa-solid fa-building-user"></i> Department Executive Hub
+      </div>
+      <h1 class="ai-title">
+        Head of Department (HOD) Leave &amp; Attendance Portal
+      </h1>
+      <p class="ai-subtitle">
+        Department-wide leave analytics, high-risk exam eligibility alerts, and escalated approval authority.
+      </p>
+    </div>
+
+    <div class="ai-action-buttons">
+      <a href="{{ url_for('leave_reports') }}" class="btn btn-secondary btn-sm">
+        <i class="fa-solid fa-file-export"></i> Export Reports
+      </a>
+      <a href="{{ url_for('faculty_leave_dashboard') }}" class="btn btn-primary btn-sm">
+        <i class="fa-solid fa-list-check"></i> Full Queue
+      </a>
+    </div>
+  </div>
+
+  <!-- Executive KPI Cards -->
+  <div class="stats-grid" style="margin-bottom: 2rem;">
+    <div class="stat-card">
+      <div class="stat-icon icon-purple">
+        <i class="fa-solid fa-folder-tree"></i>
+      </div>
+      <div class="stat-info">
+        <div class="stat-value">{{ total_reqs }}</div>
+        <div class="stat-label">Total Department Leaves</div>
+      </div>
+    </div>
+
+    <div class="stat-card" style="border-color: rgba(168, 85, 247, 0.4);">
+      <div class="stat-icon" style="background: rgba(168, 85, 247, 0.2); color: #c084fc;">
+        <i class="fa-solid fa-bell-concierge"></i>
+      </div>
+      <div class="stat-info">
+        <div class="stat-value" style="color: #c084fc;">{{ pending_hod }}</div>
+        <div class="stat-label">Escalated in HOD Queue</div>
+      </div>
+    </div>
+
+    <div class="stat-card" style="border-color: rgba(239, 68, 68, 0.4);">
+      <div class="stat-icon" style="background: rgba(239, 68, 68, 0.2); color: #ef4444;">
+        <i class="fa-solid fa-radiation"></i>
+      </div>
+      <div class="stat-info">
+        <div class="stat-value" style="color: #ef4444;">{{ high_risk_total }}</div>
+        <div class="stat-label">High-Risk Impact Applications</div>
+      </div>
+    </div>
+
+    <div class="stat-card" style="border-color: rgba(16, 185, 129, 0.4);">
+      <div class="stat-icon" style="background: rgba(16, 185, 129, 0.2); color: #10b981;">
+        <i class="fa-solid fa-certificate"></i>
+      </div>
+      <div class="stat-info">
+        <div class="stat-value" style="color: #10b981;">{{ approved_total }}</div>
+        <div class="stat-label">Approved Applications</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Escalated Approval Queue for HOD -->
+  <div class="card" style="padding: 1.5rem; margin-bottom: 2rem;">
+    <div class="card-header" style="border-bottom: 1px solid var(--border-glass); padding-bottom: 1rem; margin-bottom: 1rem;">
+      <h2 class="card-title">
+        <i class="fa-solid fa-triangle-exclamation" style="color: var(--secondary);"></i> 
+        Escalated Applications Requiring HOD Authority ({{ escalated_requests|length }})
+      </h2>
+      <span style="font-size: 0.85rem; color: var(--text-muted);">
+        Includes leaves exceeding maximum duration or special academic/duty categories.
+      </span>
+    </div>
+
+    {% if escalated_requests %}
+      <div class="table-responsive">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Student Details</th>
+              <th>Category</th>
+              <th>Period</th>
+              <th>Duration</th>
+              <th>Current Rate</th>
+              <th>Projected Rate</th>
+              <th>Risk Assessment</th>
+              <th>Doc</th>
+              <th style="text-align: right;">HOD Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in escalated_requests %}
+              <tr>
+                <td>
+                  <div style="font-weight: 700; color: #ffffff;">{{ r.student_name or r.roll_number }}</div>
+                  <div style="font-size: 0.78rem; font-family: var(--font-mono); color: var(--secondary);">{{ r.roll_number }}</div>
+                  <div style="font-size: 0.72rem; color: var(--text-dim);">{{ r.dept_name or 'General' }} &bull; {{ r.section_name or 'Sec A' }}</div>
+                </td>
+                <td>
+                  <span class="ai-micro-tag tag-success">{{ r.leave_type_name }}</span>
+                  <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.2rem;">{{ r.reason }}</div>
+                </td>
+                <td>
+                  <span style="font-family: var(--font-mono); font-size: 0.82rem; color: #ffffff;">{{ r.start_date }} &rarr; {{ r.end_date }}</span>
+                </td>
+                <td>
+                  <strong style="color: #ffffff;">{{ r.total_days }}d</strong> ({{ r.affected_classes }} slots)
+                </td>
+                <td>
+                  <span class="ai-rate-val {% if r.current_attendance_pct < 75 %}text-danger{% else %}text-success{% endif %}">
+                    {{ r.current_attendance_pct }}%
+                  </span>
+                </td>
+                <td>
+                  <span class="ai-projected-val {% if r.projected_attendance_pct < 75 %}text-danger{% else %}text-success{% endif %}">
+                    {{ r.projected_attendance_pct }}%
+                  </span>
+                </td>
+                <td>
+                  {% if r.risk_level == 'HIGH_RISK' %}
+                    <span class="badge badge-ai-critical"><i class="fa-solid fa-radiation"></i> High Risk</span>
+                  {% elif r.risk_level == 'WARNING' %}
+                    <span class="badge badge-ai-moderate"><i class="fa-solid fa-triangle-exclamation"></i> Warning</span>
+                  {% else %}
+                    <span class="badge badge-ai-safe"><i class="fa-solid fa-circle-check"></i> Safe</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if r.doc_id %}
+                    <a href="{{ url_for('view_leave_document', doc_id=r.doc_id) }}" target="_blank" class="btn btn-secondary btn-sm" style="padding: 0.2rem 0.4rem;">
+                      <i class="fa-solid fa-paperclip"></i>
+                    </a>
+                  {% else %}
+                    <span style="color: var(--text-dim); font-size: 0.75rem;">None</span>
+                  {% endif %}
+                </td>
+                <td style="text-align: right;">
+                  <a href="{{ url_for('faculty_leave_dashboard', search=r.roll_number) }}" class="btn btn-primary btn-sm">
+                    <i class="fa-solid fa-gavel"></i> Take Action
+                  </a>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div style="text-align: center; padding: 2.5rem 1rem;">
+        <i class="fa-solid fa-circle-check" style="font-size: 2.5rem; color: #10b981; margin-bottom: 0.75rem;"></i>
+        <h3 style="color: #ffffff; font-weight: 700;">HOD Queue is Clean</h3>
+        <p style="color: var(--text-muted); font-size: 0.88rem; margin-top: 0.2rem;">
+          No escalated leave requests currently awaiting HOD executive approval.
+        </p>
+      </div>
+    {% endif %}
+  </div>
+
+  <!-- Department-Wise Leave & Risk Statistics -->
+  <div class="card" style="padding: 1.5rem;">
+    <div class="card-header" style="border-bottom: 1px solid var(--border-glass); padding-bottom: 1rem; margin-bottom: 1rem;">
+      <h2 class="card-title">
+        <i class="fa-solid fa-chart-pie" style="color: var(--primary);"></i> 
+        Department-Wise Leave Distribution &amp; Risk Metrics
+      </h2>
+    </div>
+
+    <div class="table-responsive">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Department Name</th>
+            <th>Total Leave Applications</th>
+            <th>Approved Leaves</th>
+            <th>High-Risk Defaulter Impacts</th>
+            <th>Health Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for d in dept_stats %}
+            <tr>
+              <td><strong>{{ d.dept_name }}</strong></td>
+              <td>{{ d.total_leaves or 0 }}</td>
+              <td><span style="color: #10b981; font-weight: 700;">{{ d.approved_leaves or 0 }}</span></td>
+              <td><span style="color: #ef4444; font-weight: 700;">{{ d.high_risk_leaves or 0 }}</span></td>
+              <td>
+                {% if (d.high_risk_leaves or 0) > 3 %}
+                  <span class="badge badge-ai-critical">Critical Risk</span>
+                {% elif (d.high_risk_leaves or 0) > 0 %}
+                  <span class="badge badge-ai-moderate">Moderate Attention</span>
+                {% else %}
+                  <span class="badge badge-ai-safe">Good Standing</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
