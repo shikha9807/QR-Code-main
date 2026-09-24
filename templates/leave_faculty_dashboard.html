@@ -1,0 +1,495 @@
+{% extends 'base.html' %}
+
+{% block title %}Faculty Leave Management &amp; Approvals{% endblock %}
+
+{% block content %}
+<div class="container container-wide">
+
+  <!-- Header -->
+  <div class="ai-header-bar">
+    <div>
+      <div class="ai-chip">
+        <i class="fa-solid fa-clipboard-check"></i> Faculty Review Portal
+      </div>
+      <h1 class="ai-title">
+        Leave Approval &amp; Attendance Impact Desk
+      </h1>
+      <p class="ai-subtitle">
+        Evaluate student leave requests with real-time timetable forecasting, OCR document inspection, and automated risk scoring.
+      </p>
+    </div>
+
+    <div class="ai-action-buttons">
+      <a href="{{ url_for('leave_reports') }}" class="btn btn-secondary btn-sm">
+        <i class="fa-solid fa-file-invoice"></i> Reports
+      </a>
+      <a href="{{ url_for('ai_risk_analytics') }}" class="btn btn-primary btn-sm">
+        <i class="fa-solid fa-brain"></i> AI Predictor
+      </a>
+    </div>
+  </div>
+
+  <!-- KPI Cards -->
+  <div class="stats-grid" style="margin-bottom: 2rem;">
+    <div class="stat-card" style="border-color: rgba(245, 158, 11, 0.35);">
+      <div class="stat-icon" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b;">
+        <i class="fa-solid fa-hourglass-half"></i>
+      </div>
+      <div class="stat-info">
+        <div class="stat-value" style="color: #f59e0b;">{{ pending_count }}</div>
+        <div class="stat-label">Pending Reviews</div>
+      </div>
+    </div>
+
+    <div class="stat-card" style="border-color: rgba(239, 68, 68, 0.35);">
+      <div class="stat-icon" style="background: rgba(239, 68, 68, 0.15); color: #ef4444;">
+        <i class="fa-solid fa-radiation"></i>
+      </div>
+      <div class="stat-info">
+        <div class="stat-value" style="color: #ef4444;">{{ high_risk_count }}</div>
+        <div class="stat-label">High-Risk Defaulter Impacts</div>
+      </div>
+    </div>
+
+    <div class="stat-card" style="border-color: rgba(16, 185, 129, 0.35);">
+      <div class="stat-icon" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">
+        <i class="fa-solid fa-circle-check"></i>
+      </div>
+      <div class="stat-info">
+        <div class="stat-value" style="color: #10b981;">{{ approved_count }}</div>
+        <div class="stat-label">Total Approved Leaves</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Filter Toolbar -->
+  <div class="card" style="padding: 1.25rem; margin-bottom: 2rem;">
+    <form method="GET" action="{{ url_for('faculty_leave_dashboard') }}" class="ai-filter-form">
+      
+      <div class="ai-filter-group" style="flex: 2; min-width: 200px;">
+        <label><i class="fa-solid fa-magnifying-glass"></i> Search Student / Roll</label>
+        <input type="text" name="search" class="form-control" placeholder="Search by name, roll, or reason..." value="{{ search }}">
+      </div>
+
+      <div class="ai-filter-group" style="flex: 1; min-width: 150px;">
+        <label><i class="fa-solid fa-filter"></i> Status</label>
+        <select name="status" class="form-control" onchange="this.form.submit()">
+          <option value="ALL" {% if status_filter == 'ALL' %}selected{% endif %}>All Statuses</option>
+          <option value="PENDING_FACULTY" {% if status_filter == 'PENDING_FACULTY' %}selected{% endif %}>⏳ Pending Faculty</option>
+          <option value="PENDING_HOD" {% if status_filter == 'PENDING_HOD' %}selected{% endif %}>🏛️ Pending HOD</option>
+          <option value="APPROVED" {% if status_filter == 'APPROVED' %}selected{% endif %}>✅ Approved</option>
+          <option value="REJECTED" {% if status_filter == 'REJECTED' %}selected{% endif %}>❌ Rejected</option>
+          <option value="CLARIFICATION_REQUESTED" {% if status_filter == 'CLARIFICATION_REQUESTED' %}selected{% endif %}>⚠️ Clarification</option>
+        </select>
+      </div>
+
+      <div class="ai-filter-group" style="flex: 1; min-width: 150px;">
+        <label><i class="fa-solid fa-radiation"></i> Risk Tier</label>
+        <select name="risk" class="form-control" onchange="this.form.submit()">
+          <option value="ALL" {% if risk_filter == 'ALL' %}selected{% endif %}>All Risk Tiers</option>
+          <option value="HIGH_RISK" {% if risk_filter == 'HIGH_RISK' %}selected{% endif %}>🔴 High Risk (&lt;75%)</option>
+          <option value="WARNING" {% if risk_filter == 'WARNING' %}selected{% endif %}>🟡 Warning (75-80%)</option>
+          <option value="SAFE" {% if risk_filter == 'SAFE' %}selected{% endif %}>🟢 Safe (&ge;80%)</option>
+        </select>
+      </div>
+
+      <div class="ai-filter-group" style="flex: 1; min-width: 150px;">
+        <label><i class="fa-solid fa-tag"></i> Category</label>
+        <select name="type" class="form-control" onchange="this.form.submit()">
+          <option value="ALL" {% if type_filter == 'ALL' %}selected{% endif %}>All Categories</option>
+          {% for lt in leave_types %}
+            <option value="{{ lt.id }}" {% if type_filter == lt.id|string %}selected{% endif %}>{{ lt.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div style="display: flex; gap: 0.5rem; align-items: flex-end;">
+        <button type="submit" class="btn btn-primary" style="height: 42px;"><i class="fa-solid fa-filter"></i> Filter</button>
+        <a href="{{ url_for('faculty_leave_dashboard') }}" class="btn btn-secondary" style="height: 42px;" title="Reset"><i class="fa-solid fa-arrows-rotate"></i></a>
+      </div>
+
+    </form>
+  </div>
+
+  <!-- Main Leave Review Table -->
+  <div class="card" style="padding: 1.5rem;">
+    <div class="card-header" style="border-bottom: 1px solid var(--border-glass); padding-bottom: 1rem; margin-bottom: 1rem;">
+      <h2 class="card-title">
+        <i class="fa-solid fa-list-check" style="color: var(--secondary);"></i> 
+        Leave Applications Roster ({{ requests|length }} records)
+      </h2>
+    </div>
+
+    {% if requests %}
+      <div class="table-responsive">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Student Details</th>
+              <th>Category &amp; Reason</th>
+              <th>Leave Dates</th>
+              <th>Timetable Slots</th>
+              <th>Current Rate</th>
+              <th>Projected Rate</th>
+              <th>Risk Tier</th>
+              <th>Status</th>
+              <th>Doc</th>
+              <th style="text-align: right;">Review Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in requests %}
+              <tr>
+                <!-- Student Info -->
+                <td>
+                  <div style="font-weight: 700; color: #ffffff;">{{ r.student_name or r.roll_number }}</div>
+                  <div style="font-size: 0.78rem; font-family: var(--font-mono); color: var(--secondary);">{{ r.roll_number }}</div>
+                  <div style="font-size: 0.72rem; color: var(--text-dim);">{{ r.dept_name or 'General' }} &bull; {{ r.section_name or 'Sec A' }}</div>
+                </td>
+
+                <!-- Category & Reason -->
+                <td style="max-width: 180px;">
+                  <span class="ai-micro-tag tag-success" style="font-size: 0.72rem;">{{ r.leave_type_name }}</span>
+                  <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="{{ r.reason }}">
+                    {{ r.reason }}
+                  </div>
+                </td>
+
+                <!-- Dates -->
+                <td>
+                  <div style="font-size: 0.85rem; font-family: var(--font-mono); color: #ffffff;">
+                    {{ r.start_date }} &rarr; {{ r.end_date }}
+                  </div>
+                  <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 0.1rem;">
+                    {{ r.total_days }} day{% if r.total_days > 1 %}s{% endif %}
+                  </div>
+                </td>
+
+                <!-- Affected Timetable Slots -->
+                <td style="text-align: center;">
+                  <span style="font-weight: 800; color: #f59e0b; font-size: 1.05rem;">
+                    {{ r.affected_classes }}
+                  </span>
+                </td>
+
+                <!-- Current Attendance -->
+                <td>
+                  <span class="ai-rate-val {% if r.current_attendance_pct < 75 %}text-danger{% else %}text-success{% endif %}">
+                    {{ r.current_attendance_pct }}%
+                  </span>
+                </td>
+
+                <!-- Projected Attendance -->
+                <td>
+                  <span class="ai-projected-val {% if r.projected_attendance_pct < 75 %}text-danger{% elif r.projected_attendance_pct < 80 %}text-warning{% else %}text-info{% endif %}">
+                    {{ r.projected_attendance_pct }}%
+                  </span>
+                </td>
+
+                <!-- Risk Tier -->
+                <td>
+                  {% if r.risk_level == 'HIGH_RISK' %}
+                    <span class="badge badge-ai-critical"><i class="fa-solid fa-radiation"></i> High Risk</span>
+                  {% elif r.risk_level == 'WARNING' %}
+                    <span class="badge badge-ai-moderate"><i class="fa-solid fa-triangle-exclamation"></i> Warning</span>
+                  {% else %}
+                    <span class="badge badge-ai-safe"><i class="fa-solid fa-shield-check"></i> Safe</span>
+                  {% endif %}
+                </td>
+
+                <!-- Status -->
+                <td>
+                  {% if r.status == 'APPROVED' %}
+                    <span class="badge badge-status-approved">Approved</span>
+                  {% elif r.status == 'REJECTED' %}
+                    <span class="badge badge-status-rejected">Rejected</span>
+                  {% elif r.status == 'PENDING_HOD' %}
+                    <span class="badge badge-status-pending-hod">In HOD Queue</span>
+                  {% elif r.status == 'CLARIFICATION_REQUESTED' %}
+                    <span class="badge badge-status-clarification">Clarification</span>
+                  {% else %}
+                    <span class="badge badge-status-pending-faculty">Pending Review</span>
+                  {% endif %}
+                </td>
+
+                <!-- Document Link -->
+                <td>
+                  {% if r.doc_id %}
+                    <a href="{{ url_for('view_leave_document', doc_id=r.doc_id) }}" target="_blank" class="btn btn-secondary btn-sm" style="font-size: 0.72rem; padding: 0.2rem 0.4rem;">
+                      <i class="fa-solid fa-paperclip"></i>
+                    </a>
+                  {% else %}
+                    <span style="color: var(--text-dim); font-size: 0.72rem;">-</span>
+                  {% endif %}
+                </td>
+
+                <!-- Action Button -->
+                <td style="text-align: right;">
+                  <button type="button" class="btn btn-primary btn-sm" onclick="openReviewModal({{ r.id }})" title="Review and Take Action">
+                    <i class="fa-solid fa-gavel"></i> Review
+                  </button>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div style="text-align: center; padding: 3rem 1rem;">
+        <div style="font-size: 3rem; color: var(--text-dim); margin-bottom: 1rem;">
+          <i class="fa-solid fa-folder-open"></i>
+        </div>
+        <h3 style="color: #ffffff; font-weight: 700;">No Requests Found</h3>
+        <p style="color: var(--text-muted); font-size: 0.95rem; margin-top: 0.25rem;">
+          Try clearing search keywords or changing filter parameters.
+        </p>
+      </div>
+    {% endif %}
+
+  </div>
+
+</div>
+
+<!-- Action / Decision Review Modal -->
+<div id="reviewModal" class="ai-modal-backdrop" style="display: none;">
+  <div class="ai-modal-card" style="max-width: 750px;">
+    
+    <div class="ai-modal-header">
+      <div style="display: flex; align-items: center; gap: 0.75rem;">
+        <div class="ai-modal-icon">
+          <i class="fa-solid fa-gavel"></i>
+        </div>
+        <div>
+          <h3 id="revModalTitle" style="color: #ffffff; font-size: 1.2rem; font-weight: 700;">
+            Review Leave Application
+          </h3>
+          <p id="revModalSubtitle" style="color: var(--text-muted); font-size: 0.82rem; margin-top: 0.1rem;">
+            Examine attendance impact forecast &amp; execute workflow decision.
+          </p>
+        </div>
+      </div>
+      <button type="button" class="ai-modal-close" onclick="closeReviewModal()">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+
+    <div class="ai-modal-body">
+      <div id="revModalLoading" style="text-align: center; padding: 2rem;">
+        <i class="fa-solid fa-spinner fa-spin" style="font-size: 2rem; color: var(--primary);"></i>
+      </div>
+
+      <div id="revModalContent" style="display: none;">
+        
+        <!-- Impact Highlights -->
+        <div class="impact-metric-grid" style="margin-top: 0; margin-bottom: 1.25rem;">
+          <div class="impact-metric-card">
+            <div class="impact-metric-val" id="revCurPct">--%</div>
+            <div class="impact-metric-lbl">Current Rate</div>
+          </div>
+          <div class="impact-metric-card">
+            <div class="impact-metric-val" id="revProjPct">--%</div>
+            <div class="impact-metric-lbl">Projected Rate</div>
+          </div>
+          <div class="impact-metric-card">
+            <div class="impact-metric-val text-warning" id="revAffected">0</div>
+            <div class="impact-metric-lbl">Missed Lectures</div>
+          </div>
+          <div class="impact-metric-card">
+            <div class="impact-metric-val" id="revRiskBadge"></div>
+            <div class="impact-metric-lbl">Risk Tier</div>
+          </div>
+        </div>
+
+        <!-- Student & Leave Info -->
+        <div style="background: rgba(0, 0, 0, 0.25); padding: 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border-glass); margin-bottom: 1.25rem;">
+          <div style="font-size: 0.88rem; color: #ffffff; margin-bottom: 0.35rem;">
+            <strong>Student:</strong> <span id="revStudentName"></span> (<span id="revRoll" style="font-family: var(--font-mono); color: var(--secondary);"></span>)
+          </div>
+          <div style="font-size: 0.85rem; color: #ffffff; margin-bottom: 0.35rem;">
+            <strong>Dates:</strong> <span id="revDates" style="font-family: var(--font-mono);"></span> (<span id="revDays"></span>)
+          </div>
+          <div style="font-size: 0.85rem; color: #ffffff;">
+            <strong>Reason:</strong> <span id="revReason" style="color: #cbd5e1;"></span>
+          </div>
+          <div id="revDescriptionBox" style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.35rem;"></div>
+        </div>
+
+        <!-- OCR Attachment Preview (If exists) -->
+        <div id="revDocBox" style="display: none; background: rgba(99, 102, 241, 0.08); border: 1px dashed rgba(99, 102, 241, 0.4); border-radius: var(--radius-sm); padding: 1rem; margin-bottom: 1.25rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <span style="font-size: 0.85rem; font-weight: 700; color: #a5b4fc;"><i class="fa-solid fa-paperclip"></i> Attached Document &amp; OCR Assistant</span>
+            <a id="revDocDownloadLink" href="#" target="_blank" class="btn btn-secondary btn-sm" style="font-size: 0.72rem; padding: 0.15rem 0.5rem;">Open Document</a>
+          </div>
+          <div id="revOcrText" style="font-size: 0.75rem; color: var(--text-muted); font-family: var(--font-mono); max-height: 80px; overflow-y: auto; background: rgba(0,0,0,0.3); padding: 0.5rem; border-radius: 4px;"></div>
+        </div>
+
+        <!-- Subject Impact Table -->
+        <div id="revSubjectSection" style="margin-bottom: 1.25rem;">
+          <div style="font-size: 0.82rem; font-weight: 700; color: var(--text-muted); margin-bottom: 0.5rem;">
+            <i class="fa-solid fa-table-list"></i> Subject-Wise Impact Breakdown:
+          </div>
+          <div class="table-responsive">
+            <table class="data-table" style="font-size: 0.78rem;">
+              <thead>
+                <tr>
+                  <th>Course</th>
+                  <th>Current %</th>
+                  <th>Missed Slots</th>
+                  <th>Projected %</th>
+                  <th>Risk Tier</th>
+                </tr>
+              </thead>
+              <tbody id="revSubjectTbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Action Form -->
+        <div style="border-top: 1px solid var(--border-glass); padding-top: 1rem;">
+          <label class="form-label" for="actionRemarks">
+            <i class="fa-solid fa-comment-dots"></i> Reviewer Remarks / Feedback (Optional):
+          </label>
+          <textarea id="actionRemarks" class="form-control" rows="2" placeholder="Add remarks or justification for approval, rejection, or clarification..."></textarea>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="ai-modal-footer" style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;">
+      <button type="button" class="btn btn-secondary btn-sm" onclick="closeReviewModal()">Cancel</button>
+
+      <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+        <button type="button" class="btn btn-secondary btn-sm" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);" onclick="submitDecision('REQUEST_CLARIFICATION')">
+          <i class="fa-solid fa-question"></i> Request Clarification
+        </button>
+        {% if session.get('role') in ['teacher', 'admin'] %}
+          <button type="button" class="btn btn-secondary btn-sm" style="color: #c084fc; border-color: rgba(168, 85, 247, 0.4);" onclick="submitDecision('FORWARD_TO_HOD')">
+            <i class="fa-solid fa-forward"></i> Forward to HOD
+          </button>
+        {% endif %}
+        <button type="button" class="btn btn-primary btn-sm" style="background: #ef4444; border-color: #ef4444;" onclick="submitDecision('REJECT')">
+          <i class="fa-solid fa-xmark"></i> Reject
+        </button>
+        <button type="button" class="btn btn-primary btn-sm" style="background: #10b981; border-color: #10b981;" onclick="submitDecision('APPROVE')">
+          <i class="fa-solid fa-check"></i> Approve
+        </button>
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let activeLeaveId = null;
+
+function openReviewModal(leaveId) {
+  activeLeaveId = leaveId;
+  const modal = document.getElementById('reviewModal');
+  const loading = document.getElementById('revModalLoading');
+  const content = document.getElementById('revModalContent');
+  modal.style.display = 'flex';
+  loading.style.display = 'block';
+  content.style.display = 'none';
+  document.getElementById('actionRemarks').value = '';
+
+  fetch(`/api/leave/${leaveId}/details`)
+    .then(res => res.json())
+    .then(data => {
+      loading.style.display = 'none';
+      if (data.leave) {
+        renderReviewModal(data);
+        content.style.display = 'block';
+      }
+    })
+    .catch(err => {
+      loading.style.display = 'none';
+      alert('Failed to load leave details.');
+    });
+}
+
+function renderReviewModal(data) {
+  const l = data.leave;
+  document.getElementById('revModalTitle').textContent = `Review #LEAVE-${l.id} (${l.leave_type_name})`;
+  document.getElementById('revCurPct').textContent = l.current_attendance_pct + '%';
+  document.getElementById('revProjPct').textContent = l.projected_attendance_pct + '%';
+  document.getElementById('revProjPct').style.color = l.projected_attendance_pct < 75 ? '#ef4444' : '#10b981';
+  document.getElementById('revAffected').textContent = l.affected_classes;
+  document.getElementById('revRiskBadge').textContent = l.risk_level;
+  document.getElementById('revRiskBadge').style.color = l.risk_level === 'HIGH_RISK' ? '#ef4444' : '#10b981';
+
+  document.getElementById('revStudentName').textContent = l.student_name || l.roll_number;
+  document.getElementById('revRoll').textContent = l.roll_number;
+  document.getElementById('revDates').textContent = `${l.start_date} to ${l.end_date}`;
+  document.getElementById('revDays').textContent = `${l.total_days} day(s)`;
+  document.getElementById('revReason').textContent = l.reason;
+  document.getElementById('revDescriptionBox').textContent = l.description ? `Details: ${l.description}` : '';
+
+  // Document Box
+  const docBox = document.getElementById('revDocBox');
+  if (data.document) {
+    docBox.style.display = 'block';
+    document.getElementById('revDocDownloadLink').href = `/leave/document/${data.document.id}`;
+    document.getElementById('revOcrText').textContent = data.document.ocr_extracted_text || 'OCR preview not available.';
+  } else {
+    docBox.style.display = 'none';
+  }
+
+  // Subjects
+  const tbody = document.getElementById('revSubjectTbody');
+  tbody.innerHTML = '';
+  if (data.subjects && data.subjects.length > 0) {
+    data.subjects.forEach(s => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong>${s.course_code}</strong></td>
+        <td>${s.current_pct}%</td>
+        <td style="color: #f59e0b; font-weight: 700;">${s.classes_affected}</td>
+        <td style="font-weight: 800; color: ${s.projected_pct < 75 ? '#ef4444' : '#10b981'};">${s.projected_pct}%</td>
+        <td><span class="badge ${s.risk_level === 'HIGH_RISK' ? 'badge-status-rejected' : 'badge-status-approved'}">${s.risk_level}</span></td>
+      `;
+      tbody.appendChild(tr);
+    });
+    document.getElementById('revSubjectSection').style.display = 'block';
+  } else {
+    document.getElementById('revSubjectSection').style.display = 'none';
+  }
+}
+
+function submitDecision(action) {
+  if (!activeLeaveId) return;
+  const remarks = document.getElementById('actionRemarks').value.trim();
+
+  if (action === 'REJECT' && !remarks) {
+    if (!confirm('Are you sure you want to reject without providing specific remarks?')) return;
+  }
+
+  fetch(`/api/leave/${activeLeaveId}/action`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: action, remarks: remarks })
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.success) {
+      alert(data.message);
+      closeReviewModal();
+      window.location.reload();
+    } else {
+      alert('Error: ' + (data.error || 'Action failed'));
+    }
+  })
+  .catch(err => alert('Network error occurred.'));
+}
+
+function closeReviewModal() {
+  document.getElementById('reviewModal').style.display = 'none';
+}
+
+window.addEventListener('click', function(e) {
+  const modal = document.getElementById('reviewModal');
+  if (e.target === modal) closeReviewModal();
+});
+</script>
+{% endblock %}

@@ -17,20 +17,93 @@
 
     <div class="nav-links">
       {% if session.get('user_id') %}
+        {% set role = session.get('role') %}
+        
         <a href="{{ url_for('dashboard') }}" class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}">
           <i class="fa-solid fa-gauge-high"></i> Dashboard
         </a>
-        <a href="{{ url_for('reports') }}" class="nav-link {% if request.endpoint == 'reports' %}active{% endif %}">
-          <i class="fa-solid fa-chart-pie"></i> Reports
-        </a>
-        {% if session.get('role') == 'admin' %}
-        <a href="{{ url_for('admin_dashboard') }}" class="nav-link {% if request.endpoint == 'admin_dashboard' or 'admin_' in request.endpoint %}active{% endif %}">
-          <i class="fa-solid fa-user-shield"></i> Admin
-        </a>
+
+        {% if role == 'student' %}
+          <a href="{{ url_for('apply_leave') }}" class="nav-link {% if request.endpoint == 'apply_leave' %}active{% endif %}" style="color: #38bdf8;">
+            <i class="fa-solid fa-paper-plane"></i> Apply Leave
+          </a>
+          <a href="{{ url_for('student_simulator') }}" class="nav-link {% if request.endpoint == 'student_simulator' %}active{% endif %}">
+            <i class="fa-solid fa-sliders"></i> Simulator
+          </a>
+          <a href="{{ url_for('student_leave_history') }}" class="nav-link {% if request.endpoint == 'student_leave_history' %}active{% endif %}">
+            <i class="fa-solid fa-clock-rotate-left"></i> History
+          </a>
+          <a href="{{ url_for('ai_assistant_view') }}" class="nav-link {% if request.endpoint == 'ai_assistant_view' %}active{% endif %}" style="color: #c084fc;">
+            <i class="fa-solid fa-robot"></i> AI Assistant
+          </a>
+        {% else %}
+          {% if role in ['teacher', 'admin'] %}
+            <a href="{{ url_for('reports') }}" class="nav-link {% if request.endpoint == 'reports' %}active{% endif %}">
+              <i class="fa-solid fa-chart-pie"></i> Reports
+            </a>
+          {% endif %}
+
+          <a href="{{ url_for('faculty_leave_dashboard') }}" class="nav-link {% if request.endpoint == 'faculty_leave_dashboard' %}active{% endif %}" style="position: relative;">
+            <i class="fa-solid fa-clipboard-check"></i> Leave Hub
+            {% if pending_leave_badge_count > 0 %}
+              <span class="nav-badge-alert">{{ pending_leave_badge_count }}</span>
+            {% endif %}
+          </a>
+
+          <a href="{{ url_for('ai_risk_analytics') }}" class="nav-link {% if request.endpoint == 'ai_risk_analytics' %}active{% endif %}" style="color: #c084fc;">
+            <i class="fa-solid fa-brain"></i> AI Predictor
+          </a>
+
+          {% if role == 'hod' %}
+            <a href="{{ url_for('hod_leave_dashboard') }}" class="nav-link {% if request.endpoint == 'hod_leave_dashboard' %}active{% endif %}" style="color: #38bdf8;">
+              <i class="fa-solid fa-building-user"></i> HOD Desk
+            </a>
+          {% endif %}
+
+          {% if role == 'admin' %}
+            <a href="{{ url_for('admin_dashboard') }}" class="nav-link {% if request.endpoint == 'admin_dashboard' or 'admin_' in request.endpoint and 'leave' not in request.endpoint %}active{% endif %}">
+              <i class="fa-solid fa-user-shield"></i> Admin
+            </a>
+            <a href="{{ url_for('admin_leave_settings') }}" class="nav-link {% if 'leave-settings' in request.path or 'timetable' in request.path or 'holidays' in request.path %}active{% endif %}" style="color: #38bdf8;">
+              <i class="fa-solid fa-gear"></i> Leave Config
+            </a>
+          {% endif %}
         {% endif %}
+
+        <!-- Notification Bell Dropdown -->
+        <div class="nav-notification-wrapper">
+          <button type="button" class="nav-notif-btn" onclick="toggleNotificationDropdown()" title="Notifications">
+            <i class="fa-solid fa-bell"></i>
+            {% if unread_notif_count > 0 %}
+              <span class="notif-badge" id="notif-count-badge">{{ unread_notif_count }}</span>
+            {% endif %}
+          </button>
+          <div id="notifDropdown" class="notif-dropdown-menu" style="display: none;">
+            <div class="notif-header">
+              <span style="font-weight: 700; color: #ffffff; font-size: 0.9rem;"><i class="fa-solid fa-bell"></i> Notifications</span>
+              <button type="button" class="btn-text-action" onclick="markAllNotificationsRead()">Mark all read</button>
+            </div>
+            <div class="notif-list" id="notifListContainer">
+              {% if recent_notifications %}
+                {% for n in recent_notifications %}
+                  <div class="notif-item {% if not n.is_read %}notif-unread{% endif %}" onclick="markNotifAsRead('{{ n.id }}', '{{ n.link }}')">
+                    <div class="notif-item-title">{{ n.title }}</div>
+                    <div class="notif-item-msg">{{ n.message }}</div>
+                    <div class="notif-item-time">{{ n.created_at }}</div>
+                  </div>
+                {% endfor %}
+              {% else %}
+                <div style="padding: 1.5rem; text-align: center; color: var(--text-muted); font-size: 0.85rem;">
+                  No notifications yet.
+                </div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
         <div class="nav-user">
-          <span class="user-badge">
-            <i class="fa-solid fa-circle-user"></i> {{ session.get('username') }}
+          <span class="user-badge" title="Role: {{ role|upper }}">
+            <i class="fa-solid fa-circle-user"></i> {{ session.get('username') }} <span style="font-size: 0.72rem; opacity: 0.8;">({{ role|upper }})</span>
           </span>
           <a href="{{ url_for('logout') }}" class="btn btn-secondary btn-sm" title="Log Out">
             <i class="fa-solid fa-right-from-bracket"></i>
@@ -77,6 +150,43 @@
   </footer>
 
   <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  <script>
+    function toggleNotificationDropdown() {
+      const dd = document.getElementById('notifDropdown');
+      if (dd) {
+        dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
+      }
+    }
+
+    function markNotifAsRead(id, link) {
+      fetch(`/api/notifications/read/${id}`, { method: 'POST' })
+        .then(() => {
+          if (link && link !== 'None' && link !== '') {
+            window.location.href = link;
+          } else {
+            window.location.reload();
+          }
+        });
+    }
+
+    function markAllNotificationsRead() {
+      fetch('/api/notifications/read-all', { method: 'POST' })
+        .then(() => {
+          const badge = document.getElementById('notif-count-badge');
+          if (badge) badge.style.display = 'none';
+          document.querySelectorAll('.notif-item').forEach(el => el.classList.remove('notif-unread'));
+        });
+    }
+
+    // Close notifications on outer click
+    window.addEventListener('click', function(e) {
+      const wrapper = document.querySelector('.nav-notification-wrapper');
+      const dd = document.getElementById('notifDropdown');
+      if (wrapper && dd && !wrapper.contains(e.target)) {
+        dd.style.display = 'none';
+      }
+    });
+  </script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

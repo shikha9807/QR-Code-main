@@ -1,0 +1,132 @@
+{% extends 'base.html' %}
+
+{% block title %}AI Attendance &amp; Leave Assistant{% endblock %}
+
+{% block content %}
+<div class="container container-narrow">
+
+  <!-- Header -->
+  <div class="ai-header-bar">
+    <div>
+      <div class="ai-chip">
+        <i class="fa-solid fa-robot"></i> Conversational Intelligence
+      </div>
+      <h1 class="ai-title">
+        AI Attendance &amp; Leave Assistant
+      </h1>
+      <p class="ai-subtitle">
+        Ask anything about your live attendance status, leave allowance simulations, and recovery goals.
+      </p>
+    </div>
+
+    <div class="ai-action-buttons">
+      <a href="{{ url_for('apply_leave') }}" class="btn btn-primary btn-sm">
+        <i class="fa-solid fa-paper-plane"></i> Apply Leave
+      </a>
+      <a href="{{ url_for('student_simulator') }}" class="btn btn-secondary btn-sm">
+        <i class="fa-solid fa-sliders"></i> Simulator
+      </a>
+    </div>
+  </div>
+
+  <!-- Chat Card Container -->
+  <div class="chat-container">
+    
+    <!-- Quick Prompts Bar -->
+    <div class="quick-prompts">
+      <span style="font-size: 0.75rem; color: var(--text-dim); align-self: center;">Suggested Prompts:</span>
+      {% if session.get('role') == 'student' %}
+        <button type="button" class="prompt-chip" onclick="sendQuickPrompt('What is my current attendance?')">📊 My Attendance</button>
+        <button type="button" class="prompt-chip" onclick="sendQuickPrompt('How many classes have I missed?')">📋 Classes Missed</button>
+        <button type="button" class="prompt-chip" onclick="sendQuickPrompt('Can I take leave for 3 days without falling below 75%?')">🔮 Leave Safety Check (3d)</button>
+        <button type="button" class="prompt-chip" onclick="sendQuickPrompt('How many classes do I need to attend to reach 75%?')">🎯 Consecutive Target</button>
+        <button type="button" class="prompt-chip" onclick="sendQuickPrompt('What is the status of my leave request?')">📑 My Leave Status</button>
+      {% else %}
+        <button type="button" class="prompt-chip" onclick="sendQuickPrompt('Show students with pending leave requests')">⏳ Pending Queue</button>
+        <button type="button" class="prompt-chip" onclick="sendQuickPrompt('Which students will fall below the attendance threshold if their leave is approved?')">⚠️ High Risk Defaulters</button>
+        <button type="button" class="prompt-chip" onclick="sendQuickPrompt('Show this month\'s leave statistics')">📊 Leave Statistics</button>
+      {% endif %}
+    </div>
+
+    <!-- Messages Window -->
+    <div class="chat-messages" id="chatMessages">
+      <div class="chat-bubble chat-bot">
+        👋 Hello <strong>{{ user.full_name or user.username }}</strong>! I am your AI Attendance &amp; Leave Assistant. 
+        Ask me about your attendance figures, simulate future leaves, or check approval statuses!
+      </div>
+    </div>
+
+    <!-- Input Bar -->
+    <div class="chat-input-bar">
+      <input type="text" id="chatInput" class="form-control" placeholder="Type your attendance or leave question here..." onkeydown="if(event.key==='Enter') sendMessage()">
+      <button type="button" class="btn btn-primary" onclick="sendMessage()" style="min-width: 90px;">
+        <i class="fa-solid fa-paper-plane"></i> Send
+      </button>
+    </div>
+
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function sendQuickPrompt(promptText) {
+  document.getElementById('chatInput').value = promptText;
+  sendMessage();
+}
+
+function appendMessage(sender, text) {
+  const container = document.getElementById('chatMessages');
+  const bubble = document.createElement('div');
+  bubble.className = 'chat-bubble ' + (sender === 'user' ? 'chat-user' : 'chat-bot');
+  
+  // Format simple markdown
+  let formatted = text
+    .replace(/^### (.*$)/gim, '<h4 style="color:#ffffff; margin: 0.5rem 0;">$1</h4>')
+    .replace(/\*\*(.*?)\*\*/gim, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/gim, '<em>$1</em>')
+    .replace(/`(.*?)`/gim, '<code style="background:rgba(0,0,0,0.3); padding:0.1rem 0.3rem; border-radius:3px;">$1</code>')
+    .replace(/\n/gim, '<br>');
+
+  bubble.innerHTML = formatted;
+  container.appendChild(bubble);
+  container.scrollTop = container.scrollHeight;
+}
+
+function sendMessage() {
+  const input = document.getElementById('chatInput');
+  const query = input.value.trim();
+  if (!query) return;
+
+  appendMessage('user', query);
+  input.value = '';
+
+  // Placeholder thinking message
+  const container = document.getElementById('chatMessages');
+  const loadingBubble = document.createElement('div');
+  loadingBubble.className = 'chat-bubble chat-bot';
+  loadingBubble.id = 'chatLoading';
+  loadingBubble.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Analyzing attendance data...';
+  container.appendChild(loadingBubble);
+  container.scrollTop = container.scrollHeight;
+
+  fetch('/api/ai/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query: query })
+  })
+  .then(res => res.json())
+  .then(data => {
+    const loading = document.getElementById('chatLoading');
+    if (loading) loading.remove();
+    appendMessage('bot', data.reply || 'No response received.');
+  })
+  .catch(err => {
+    const loading = document.getElementById('chatLoading');
+    if (loading) loading.remove();
+    appendMessage('bot', 'Network error. Please try again.');
+  });
+}
+</script>
+{% endblock %}

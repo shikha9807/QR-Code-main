@@ -1,0 +1,51 @@
+================================================================================
+AI/ML ATTENDANCE MANAGEMENT SYSTEM — MODEL EVALUATION REPORT
+================================================================================
+
+1. DATASET & INGESTION SUMMARY:
+--------------------------------------------------------------------------------
+• Total Students Ingested         : 2000
+• Clean & Validated Records       : 1998
+• Quarantined Invalid Records     : 2
+• Missing Values Detected/Imputed : 0
+• Duplicate Records Filtered      : 1
+• Average Dataset Attendance      : 81.07%
+
+2. MODEL PREDICTION SUMMARY:
+--------------------------------------------------------------------------------
+• Predicted Eligible Students     : 1817 (>=75%)
+• Predicted Low Attendance / Risk : 181 (<75%)
+• Critical Defaulter Tier         : 283
+• Moderate Warning Tier           : 1715
+• Good Standing Tier              : 0
+
+3. EVALUATION METRICS:
+--------------------------------------------------------------------------------
+• Model Accuracy                  : 86.09%
+• Macro Precision                 : 92.35%
+• Macro Recall                    : 69.72%
+• Macro F1-Score                  : 74.14%
+• Defaulter Recall (Detection)    : 39.43%
+
+4. DETAILED CLASSIFICATION REPORT:
+--------------------------------------------------------------------------------
+                precision    recall  f1-score   support
+
+      Eligible       0.85      1.00      0.92      1539
+Low Attendance       1.00      0.39      0.57       459
+
+      accuracy                           0.86      1998
+     macro avg       0.92      0.70      0.74      1998
+  weighted avg       0.88      0.86      0.84      1998
+
+
+5. CONFUSION MATRIX:
+--------------------------------------------------------------------------------
+True Positives (Eligible)         : 1539
+True Negatives (Low Attendance)   : 181
+False Positives                   : 278
+False Negatives                   : 0
+
+================================================================================
+Report Generated Successfully.
+================================================================================

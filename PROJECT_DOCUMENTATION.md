@@ -229,7 +229,7 @@ pip install -r requirements.txt
 
 ### 2. Run Automated Tests
 ```bash
-python3 test_app.py
+
 ```
 *(Expected output: `Ran 7 tests ... OK`)*
 

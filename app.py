@@ -1,8 +1,9 @@
-from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, make_response
+from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, make_response, send_file
 from models import get_db_connection, init_db
 from qr_handler import generate_qr_base64
-from datetime import datetime, timedelta
+from datetime import datetime, date, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
 import uuid
 import secrets
 import socket
@@ -10,16 +11,62 @@ import csv
 import os
 import sqlite3
 import pandas as pd
+import json
 import re
 from functools import wraps
 from io import StringIO, BytesIO
+from ai_predictor import AIAttendancePredictor
+from leave_manager import (
+    LeaveCalculator, LeaveWorkflowManager, SystemSettingsManager,
+    NotificationManager, AuditLogger
+)
+from leave_ai_service import AILeaveExtractor, AILeaveAssistant, AIDocumentOCR
 
 app = Flask(__name__)
 # Move SECRET_KEY to environment variable with a fallback
 app.secret_key = os.environ.get('SECRET_KEY', 'qr_attendance_secret_key_2026_secure')
 
+# Upload Configuration for Leave Documents
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads', 'leave_documents')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10MB limit
+ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'webp'}
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
 # Ensure database is initialized
 init_db()
+
+# --- Global Context Processor for Notifications & Roles ---
+@app.context_processor
+def inject_global_data():
+    if 'user_id' in session:
+        conn = get_db_connection()
+        user_id = session['user_id']
+        role = session.get('role', 'teacher')
+        unread_notifs = NotificationManager.get_unread_count(conn, user_id)
+        notifs_list = NotificationManager.get_user_notifications(conn, user_id, limit=5)
+        
+        pending_leave_count = 0
+        if role in ['teacher', 'hod', 'admin']:
+            pending_query = "SELECT COUNT(*) as count FROM leave_requests WHERE status IN ('PENDING_FACULTY', 'PENDING_HOD')"
+            pending_row = conn.execute(pending_query).fetchone()
+            pending_leave_count = pending_row['count'] if pending_row else 0
+        elif role == 'student':
+            roll_number = session.get('username')
+            student_pending = conn.execute("SELECT COUNT(*) as count FROM leave_requests WHERE roll_number = ? AND status LIKE 'PENDING%'", (roll_number,)).fetchone()
+            pending_leave_count = student_pending['count'] if student_pending else 0
+
+        conn.close()
+        return {
+            'unread_notif_count': unread_notifs,
+            'recent_notifications': notifs_list,
+            'pending_leave_badge_count': pending_leave_count
+        }
+    return {'unread_notif_count': 0, 'recent_notifications': [], 'pending_leave_badge_count': 0}
 
 # --- RBAC Decorator ---
 def role_required(*roles):
@@ -304,12 +351,41 @@ def logout():
     return redirect(url_for('login'))
 
 @app.route('/dashboard')
-@role_required('admin', 'teacher', 'student')
+@role_required('admin', 'teacher', 'hod', 'student')
 def dashboard():
     user_id = session['user_id']
     role = session['role']
+    username = session.get('username')
 
     conn = get_db_connection()
+
+    # If student, redirect or load student portal view
+    if role == 'student':
+        student = LeaveCalculator.get_student(conn, username)
+        att_summary = LeaveCalculator.get_student_attendance_summary(conn, student['roll_number'])
+        threshold = SystemSettingsManager.get_float(conn, 'attendance_threshold', 75.0)
+        recent_leaves = conn.execute("""
+            SELECT lr.*, lt.name as leave_type_name 
+            FROM leave_requests lr
+            JOIN leave_types lt ON lr.leave_type_id = lt.id
+            WHERE lr.roll_number = ?
+            ORDER BY lr.created_at DESC LIMIT 5
+        """, (student['roll_number'],)).fetchall()
+        sim_data = LeaveCalculator.simulate_what_if(conn, student['roll_number'])
+        conn.close()
+
+        return render_template('dashboard.html',
+                               is_student=True,
+                               student=student,
+                               att_summary=att_summary,
+                               threshold=threshold,
+                               recent_leaves=recent_leaves,
+                               sim_data=sim_data)
+
+    # If HOD, redirect to dedicated HOD executive dashboard
+    if role == 'hod':
+        conn.close()
+        return redirect(url_for('hod_leave_dashboard'))
 
     # If teacher, only show their own sessions
     if role == 'teacher':
@@ -331,7 +407,7 @@ def dashboard():
             WHERE s.teacher_id = ?
         ''', (user_id,)).fetchone()['count']
     else:
-        # Admin sees everything, Student sees nothing (yet)
+        # Admin sees everything
         sessions_raw = conn.execute('''
             SELECT s.*, COUNT(a.id) as attendee_count
             FROM sessions s
@@ -351,6 +427,17 @@ def dashboard():
     else:
         active_sessions = 0
 
+    # Fetch AI Retention Summary for Proactive Alert Banner
+    try:
+        _, ai_summary = AIAttendancePredictor.analyze_all_students(
+            conn, teacher_id=user_id if role == 'teacher' else None
+        )
+    except Exception:
+        ai_summary = None
+
+    # Fetch Pending Leave Requests count
+    pending_leaves = conn.execute("SELECT COUNT(*) as count FROM leave_requests WHERE status IN ('PENDING_FACULTY', 'PENDING_HOD')").fetchone()['count']
+
     conn.close()
 
     return render_template('dashboard.html',
@@ -358,6 +445,8 @@ def dashboard():
                            total_sessions=total_sessions,
                            total_attendance=total_attendance,
                            active_sessions=active_sessions,
+                           ai_summary=ai_summary,
+                           pending_leaves=pending_leaves,
                            now_str=now_str)
 
 @app.route('/start-session', methods=['POST'])
@@ -618,6 +707,131 @@ def delete_session(session_id):
 
     flash('Session and all associated attendance records deleted.', 'success')
     return redirect(url_for('reports'))
+
+# --- AI RISK PREDICTOR & RETENTION ANALYTICS ROUTES ---
+
+@app.route('/ai-risk-analytics')
+@role_required('admin', 'teacher')
+def ai_risk_analytics():
+    search = request.args.get('search', '').strip()
+    dept_filter = request.args.get('dept_id', '').strip()
+    sect_filter = request.args.get('section_id', '').strip()
+    risk_filter = request.args.get('risk', 'ALL').strip()
+
+    conn = get_db_connection()
+    teacher_id = session['user_id'] if session.get('role') == 'teacher' else None
+
+    students, summary = AIAttendancePredictor.analyze_all_students(
+        conn,
+        dept_id=dept_filter if dept_filter else None,
+        section_id=sect_filter if sect_filter else None,
+        search=search if search else None,
+        risk_filter=risk_filter if risk_filter != 'ALL' else None,
+        teacher_id=teacher_id
+    )
+
+    departments = conn.execute('SELECT * FROM departments ORDER BY name ASC').fetchall()
+    sections = conn.execute('SELECT * FROM sections ORDER BY section_name ASC').fetchall()
+    conn.close()
+
+    return render_template('ai_risk_analytics.html',
+                           students=students,
+                           summary=summary,
+                           departments=departments,
+                           sections=sections,
+                           search=search,
+                           dept_filter=dept_filter,
+                           sect_filter=sect_filter,
+                           risk_filter=risk_filter)
+
+@app.route('/api/ai-risk-summary')
+@role_required('admin', 'teacher')
+def api_ai_risk_summary():
+    conn = get_db_connection()
+    teacher_id = session['user_id'] if session.get('role') == 'teacher' else None
+    _, summary = AIAttendancePredictor.analyze_all_students(conn, teacher_id=teacher_id)
+    conn.close()
+    return jsonify(summary)
+
+@app.route('/api/ai-student-analysis/<roll_number>')
+@role_required('admin', 'teacher')
+def api_ai_student_analysis(roll_number):
+    conn = get_db_connection()
+    teacher_id = session['user_id'] if session.get('role') == 'teacher' else None
+    analysis = AIAttendancePredictor.get_student_detail(conn, roll_number, teacher_id=teacher_id)
+    conn.close()
+    return jsonify(analysis)
+
+@app.route('/api/ai-generate-notice', methods=['POST'])
+@role_required('admin', 'teacher')
+def api_ai_generate_notice():
+    data = request.get_json() or {}
+    roll_number = data.get('roll_number', '').strip()
+    if not roll_number:
+        return jsonify({'error': 'Roll number is required'}), 400
+
+    conn = get_db_connection()
+    teacher_id = session['user_id'] if session.get('role') == 'teacher' else None
+    analysis = AIAttendancePredictor.get_student_detail(conn, roll_number, teacher_id=teacher_id)
+    conn.close()
+
+    notice_text = AIAttendancePredictor.generate_notice_text(analysis)
+    return jsonify({'notice': notice_text, 'analysis': analysis})
+
+@app.route('/export-risk-report')
+@role_required('admin', 'teacher')
+def export_risk_report():
+    search = request.args.get('search', '').strip()
+    dept_filter = request.args.get('dept_id', '').strip()
+    sect_filter = request.args.get('section_id', '').strip()
+    risk_filter = request.args.get('risk', 'ALL').strip()
+
+    conn = get_db_connection()
+    teacher_id = session['user_id'] if session.get('role') == 'teacher' else None
+
+    students, _ = AIAttendancePredictor.analyze_all_students(
+        conn,
+        dept_id=dept_filter if dept_filter else None,
+        section_id=sect_filter if sect_filter else None,
+        search=search if search else None,
+        risk_filter=risk_filter if risk_filter != 'ALL' else None,
+        teacher_id=teacher_id
+    )
+    conn.close()
+
+    si = StringIO()
+    cw = csv.writer(si)
+    cw.writerow([
+        'Roll Number', 'Full Name', 'Department', 'Section', 'Email',
+        'Total Sessions', 'Attended', 'Missed', 'Current Attendance %',
+        'AI Projected Semester %', 'Risk Tier', 'Risk Score (0-100)',
+        'Momentum Trend', 'Absence Streak', 'AI Prescriptive Recovery Plan', 'Most Missed Day'
+    ])
+
+    for st in students:
+        cw.writerow([
+            st['roll_number'],
+            st['full_name'],
+            st['department'],
+            st['section'],
+            st['email'],
+            st['total_sessions'],
+            st['attended_count'],
+            st['missed_count'],
+            f"{st['current_pct']}%",
+            f"{st['projected_final_pct']}%",
+            st['risk_level'],
+            st['risk_score'],
+            st['trend_label'],
+            st['current_absence_streak'],
+            st['recovery_message'],
+            st['most_missed_day']
+        ])
+
+    output = make_response(si.getvalue())
+    output.headers["Content-Disposition"] = f"attachment; filename=ai_defaulter_risk_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    output.headers["Content-type"] = "text/csv; charset=utf-8"
+    return output
 
 # --- ADMIN MANAGEMENT ROUTES ---
 
@@ -931,6 +1145,754 @@ def assign_teacher():
     else:
         flash('All fields are required.', 'danger')
     return redirect(url_for('admin_dashboard'))
+
+
+# ==============================================================================
+# AI-BASED LEAVE MANAGEMENT & ATTENDANCE IMPACT PREDICTION MODULE ROUTES
+# ==============================================================================
+
+# --- STUDENT LEAVE APPLICATION & NLP EXTRACTION ---
+
+@app.route('/student/leave/apply', methods=['GET', 'POST'])
+@role_required('admin', 'student', 'teacher', 'hod')
+def apply_leave():
+    conn = get_db_connection()
+    user_id = session.get('user_id')
+    username = session.get('username')
+    role = session.get('role')
+
+    # Find student profile
+    student = LeaveCalculator.get_student(conn, username)
+    roll_number = student['roll_number']
+
+    if request.method == 'POST':
+        applied_via = request.form.get('applied_via', 'form').strip()
+        leave_type_id = request.form.get('leave_type_id', '').strip()
+        start_date = request.form.get('start_date', '').strip()
+        end_date = request.form.get('end_date', '').strip()
+        reason = request.form.get('reason', '').strip()
+        description = request.form.get('description', '').strip()
+        override_roll = request.form.get('roll_number', '').strip()
+
+        if override_roll and role in ['admin', 'teacher', 'hod']:
+            roll_number = override_roll
+            student = LeaveCalculator.get_student(conn, roll_number)
+
+        if not leave_type_id or not start_date or not end_date or not reason:
+            flash('Please fill in all mandatory fields (Leave Type, Dates, Reason).', 'danger')
+            leave_types = conn.execute("SELECT * FROM leave_types WHERE is_active = 1 ORDER BY name ASC").fetchall()
+            att_summary = LeaveCalculator.get_student_attendance_summary(conn, roll_number)
+            conn.close()
+            return render_template('leave_apply.html', student=student, leave_types=leave_types, att_summary=att_summary)
+
+        # Process file upload if provided
+        file_data = None
+        if 'document' in request.files:
+            file = request.files['document']
+            if file and file.filename != '' and allowed_file(file.filename):
+                safe_orig_name = secure_filename(file.filename)
+                unique_name = f"doc_{uuid.uuid4().hex[:10]}_{safe_orig_name}"
+                file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_name)
+                file.save(file_path)
+
+                file_size = os.path.getsize(file_path)
+                file_ext = os.path.splitext(safe_orig_name)[1].lower()
+
+                # Run OCR Assistant
+                ocr_result = AIDocumentOCR.extract_document_text(file_path)
+
+                file_data = {
+                    'filename': unique_name,
+                    'original_filename': safe_orig_name,
+                    'file_path': file_path,
+                    'file_size': file_size,
+                    'file_type': file_ext,
+                    'ocr_text': ocr_result.get('text', ''),
+                    'ocr_status': ocr_result.get('status', 'PROCESSED')
+                }
+
+        ip_address = request.remote_addr or '127.0.0.1'
+        success, msg, leave_id = LeaveWorkflowManager.submit_leave_request(
+            conn, user_id=user_id, roll_number=roll_number,
+            leave_type_id=int(leave_type_id), start_date_str=start_date, end_date_str=end_date,
+            reason=reason, description=description, applied_via=applied_via,
+            file_data=file_data, ip_address=ip_address
+        )
+        conn.commit()
+        conn.close()
+
+        if success:
+            flash(f'Leave application (#LEAVE-{leave_id}) submitted successfully! AI impact calculated.', 'success')
+            return redirect(url_for('student_leave_history'))
+        else:
+            flash(f'Error submitting leave: {msg}', 'danger')
+            return redirect(url_for('apply_leave'))
+
+    leave_types = conn.execute("SELECT * FROM leave_types WHERE is_active = 1 ORDER BY name ASC").fetchall()
+    att_summary = LeaveCalculator.get_student_attendance_summary(conn, roll_number)
+    threshold = SystemSettingsManager.get_float(conn, 'attendance_threshold', 75.0)
+    conn.close()
+
+    return render_template('leave_apply.html',
+                           student=student,
+                           leave_types=leave_types,
+                           att_summary=att_summary,
+                           threshold=threshold)
+
+@app.route('/api/ai/extract-leave', methods=['POST'])
+@role_required('admin', 'student', 'teacher', 'hod')
+def api_extract_leave():
+    """Extracts structured leave parameters from natural language text using AI NLP."""
+    data = request.get_json() or {}
+    text = data.get('text', '').strip()
+    if not text:
+        return jsonify({'success': False, 'error': 'No input text provided.'}), 400
+
+    extracted = AILeaveExtractor.extract_leave_intent(text)
+
+    conn = get_db_connection()
+    leave_types = conn.execute("SELECT id, name, code FROM leave_types WHERE is_active = 1").fetchall()
+    
+    # Map code to leave_type_id
+    type_id = None
+    for lt in leave_types:
+        if lt['code'].upper() == extracted['leave_type_code'].upper():
+            type_id = lt['id']
+            break
+    if not type_id and leave_types:
+        type_id = leave_types[0]['id']
+
+    extracted['leave_type_id'] = type_id
+
+    # Compute immediate impact preview
+    username = session.get('username')
+    student = LeaveCalculator.get_student(conn, username)
+    impact = LeaveCalculator.calculate_leave_impact(
+        conn, student['roll_number'], extracted['start_date'], extracted['end_date'],
+        leave_type_code=extracted['leave_type_code']
+    )
+    subject_impacts = LeaveCalculator.calculate_subject_wise_impact(
+        conn, student['roll_number'], extracted['start_date'], extracted['end_date']
+    )
+    conn.close()
+
+    return jsonify({
+        'success': True,
+        'extracted': extracted,
+        'impact': impact,
+        'subject_impacts': subject_impacts
+    })
+
+@app.route('/api/attendance/impact-preview', methods=['POST'])
+@role_required('admin', 'student', 'teacher', 'hod')
+def api_impact_preview():
+    """Calculates live overall and subject-wise impact for selected dates."""
+    data = request.get_json() or {}
+    roll_number = data.get('roll_number') or session.get('username')
+    start_date = data.get('start_date', '').strip()
+    end_date = data.get('end_date', '').strip()
+    leave_type_id = data.get('leave_type_id')
+
+    if not start_date or not end_date:
+        return jsonify({'error': 'Start and End dates are required.'}), 400
+
+    conn = get_db_connection()
+    impact = LeaveCalculator.calculate_leave_impact(conn, roll_number, start_date, end_date, leave_type_id=leave_type_id)
+    subject_impacts = LeaveCalculator.calculate_subject_wise_impact(conn, roll_number, start_date, end_date)
+    conn.close()
+
+    return jsonify({
+        'impact': impact,
+        'subject_impacts': subject_impacts
+    })
+
+
+# --- WHAT-IF ATTENDANCE SIMULATOR ---
+
+@app.route('/student/leave/simulator')
+@role_required('admin', 'student', 'teacher', 'hod')
+def student_simulator():
+    conn = get_db_connection()
+    username = session.get('username')
+    student = LeaveCalculator.get_student(conn, username)
+    sim_data = LeaveCalculator.simulate_what_if(conn, student['roll_number'])
+    conn.close()
+
+    return render_template('leave_simulator.html', student=student, sim=sim_data)
+
+@app.route('/api/attendance/simulate', methods=['POST'])
+@role_required('admin', 'student', 'teacher', 'hod')
+def api_simulate():
+    data = request.get_json() or {}
+    roll_number = data.get('roll_number') or session.get('username')
+    custom_miss = data.get('custom_miss')
+
+    conn = get_db_connection()
+    sim_data = LeaveCalculator.simulate_what_if(conn, roll_number, custom_miss=custom_miss)
+    conn.close()
+
+    return jsonify(sim_data)
+
+
+# --- STUDENT LEAVE HISTORY ---
+
+@app.route('/student/leave/history')
+@role_required('admin', 'student', 'teacher', 'hod')
+def student_leave_history():
+    conn = get_db_connection()
+    username = session.get('username')
+    student = LeaveCalculator.get_student(conn, username)
+    roll_number = student['roll_number']
+
+    status_filter = request.args.get('status', 'ALL')
+    type_filter = request.args.get('type', 'ALL')
+
+    query = """
+        SELECT lr.*, lt.name as leave_type_name, lt.code as leave_type_code,
+               (SELECT original_filename FROM leave_documents WHERE leave_request_id = lr.id LIMIT 1) as doc_name,
+               (SELECT id FROM leave_documents WHERE leave_request_id = lr.id LIMIT 1) as doc_id
+        FROM leave_requests lr
+        JOIN leave_types lt ON lr.leave_type_id = lt.id
+        WHERE lr.roll_number = ?
+    """
+    params = [roll_number]
+
+    if status_filter != 'ALL':
+        query += " AND lr.status = ?"
+        params.append(status_filter)
+
+    if type_filter != 'ALL':
+        query += " AND lr.leave_type_id = ?"
+        params.append(type_filter)
+
+    query += " ORDER BY lr.created_at DESC"
+    requests_list = conn.execute(query, params).fetchall()
+    leave_types = conn.execute("SELECT * FROM leave_types ORDER BY name ASC").fetchall()
+    att_summary = LeaveCalculator.get_student_attendance_summary(conn, roll_number)
+    conn.close()
+
+    return render_template('leave_history.html',
+                           student=student,
+                           requests=requests_list,
+                           leave_types=leave_types,
+                           att_summary=att_summary,
+                           status_filter=status_filter,
+                           type_filter=type_filter)
+
+@app.route('/api/leave/<int:leave_id>/details')
+@role_required('admin', 'student', 'teacher', 'hod')
+def api_leave_details(leave_id):
+    """Retrieves full leave details, approval timeline history, and subject breakdown."""
+    conn = get_db_connection()
+    user_role = session.get('role')
+    username = session.get('username')
+
+    leave = conn.execute("""
+        SELECT lr.*, lt.name as leave_type_name, lt.code as leave_type_code,
+               s.full_name as student_name, s.email as student_email,
+               d.name as dept_name, sec.section_name
+        FROM leave_requests lr
+        LEFT JOIN leave_types lt ON lr.leave_type_id = lt.id
+        LEFT JOIN students s ON lr.roll_number = s.roll_number
+        LEFT JOIN departments d ON s.dept_id = d.id
+        LEFT JOIN sections sec ON s.section_id = sec.id
+        WHERE lr.id = ?
+    """, (leave_id,)).fetchone()
+
+    if not leave:
+        conn.close()
+        return jsonify({'error': 'Leave request not found.'}), 404
+
+    # Security check for student role
+    if user_role == 'student' and leave['roll_number'] != username:
+        conn.close()
+        return jsonify({'error': 'Unauthorized access.'}), 403
+
+    # Fetch workflow timeline
+    timeline = conn.execute("""
+        SELECT la.*, u.username as approver_username, u.full_name as approver_fullname
+        FROM leave_approvals la
+        LEFT JOIN users u ON la.approver_id = u.id
+        WHERE la.leave_request_id = ?
+        ORDER BY la.timestamp ASC
+    """, (leave_id,)).fetchall()
+
+    # Fetch document
+    doc = conn.execute("SELECT * FROM leave_documents WHERE leave_request_id = ?", (leave_id,)).fetchone()
+
+    # Calculate subject breakdown
+    subjects = LeaveCalculator.calculate_subject_wise_impact(conn, leave['roll_number'], leave['start_date'], leave['end_date'])
+    conn.close()
+
+    return jsonify({
+        'leave': dict(leave),
+        'timeline': [dict(t) for t in timeline],
+        'document': dict(doc) if doc else None,
+        'subjects': subjects
+    })
+
+
+# --- AI CONVERSATIONAL ASSISTANT ---
+
+@app.route('/student/leave/ai-assistant')
+@role_required('admin', 'student', 'teacher', 'hod')
+def ai_assistant_view():
+    conn = get_db_connection()
+    user = conn.execute("SELECT * FROM users WHERE id = ?", (session['user_id'],)).fetchone()
+    conn.close()
+    return render_template('leave_ai_assistant.html', user=user)
+
+@app.route('/api/ai/chat', methods=['POST'])
+@role_required('admin', 'student', 'teacher', 'hod')
+def api_ai_chat():
+    data = request.get_json() or {}
+    query = data.get('query', '').strip()
+    if not query:
+        return jsonify({'reply': 'Please type a question or request.'}), 400
+
+    conn = get_db_connection()
+    user = conn.execute("SELECT * FROM users WHERE id = ?", (session['user_id'],)).fetchone()
+    reply = AILeaveAssistant.process_query(conn, dict(user), query)
+    conn.close()
+
+    return jsonify({'reply': reply})
+
+
+# --- FACULTY LEAVE MANAGEMENT & APPROVAL PANEL ---
+
+@app.route('/faculty/leave-requests')
+@role_required('admin', 'teacher', 'hod')
+def faculty_leave_dashboard():
+    conn = get_db_connection()
+    role = session.get('role')
+    user_id = session.get('user_id')
+
+    status_filter = request.args.get('status', 'ALL')
+    risk_filter = request.args.get('risk', 'ALL')
+    type_filter = request.args.get('type', 'ALL')
+    dept_filter = request.args.get('dept_id', 'ALL')
+    search = request.args.get('search', '').strip()
+
+    requests_list = LeaveWorkflowManager.get_filtered_leave_requests(
+        conn, role=role, user_id=user_id,
+        status_filter=status_filter if status_filter != 'ALL' else None,
+        risk_filter=risk_filter if risk_filter != 'ALL' else None,
+        leave_type_filter=type_filter if type_filter != 'ALL' else None,
+        dept_filter=dept_filter if dept_filter != 'ALL' else None,
+        search=search if search else None
+    )
+
+    leave_types = conn.execute("SELECT * FROM leave_types ORDER BY name ASC").fetchall()
+    departments = conn.execute("SELECT * FROM departments ORDER BY name ASC").fetchall()
+    
+    # Counts
+    pending_count = sum(1 for r in requests_list if 'PENDING' in r['status'])
+    high_risk_count = sum(1 for r in requests_list if r['risk_level'] == 'HIGH_RISK')
+    approved_count = sum(1 for r in requests_list if r['status'] == 'APPROVED')
+
+    conn.close()
+
+    return render_template('leave_faculty_dashboard.html',
+                           requests=requests_list,
+                           leave_types=leave_types,
+                           departments=departments,
+                           status_filter=status_filter,
+                           risk_filter=risk_filter,
+                           type_filter=type_filter,
+                           dept_filter=dept_filter,
+                           search=search,
+                           pending_count=pending_count,
+                           high_risk_count=high_risk_count,
+                           approved_count=approved_count)
+
+@app.route('/api/leave/<int:leave_id>/action', methods=['POST'])
+@role_required('admin', 'teacher', 'hod')
+def api_process_leave_action(leave_id):
+    """Processes approval actions: APPROVE, REJECT, FORWARD_TO_HOD, REQUEST_CLARIFICATION."""
+    data = request.get_json() or {}
+    action = data.get('action', '').strip()
+    remarks = data.get('remarks', '').strip()
+
+    if not action:
+        return jsonify({'error': 'Action is required.'}), 400
+
+    conn = get_db_connection()
+    user = conn.execute("SELECT * FROM users WHERE id = ?", (session['user_id'],)).fetchone()
+    ip_address = request.remote_addr or '127.0.0.1'
+
+    success, msg = LeaveWorkflowManager.process_approval_action(
+        conn, leave_id, dict(user), action=action, remarks=remarks, ip_address=ip_address
+    )
+    conn.commit()
+    conn.close()
+
+    if success:
+        return jsonify({'success': True, 'message': msg})
+    return jsonify({'success': False, 'error': msg}), 400
+
+
+# --- HOD EXECUTIVE DASHBOARD & QUEUE ---
+
+@app.route('/hod/leave-dashboard')
+@role_required('admin', 'hod')
+def hod_leave_dashboard():
+    conn = get_db_connection()
+    user_id = session.get('user_id')
+    user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    dept_id = user['dept_id'] if user else None
+
+    # HOD KPI Statistics
+    total_reqs = conn.execute("SELECT COUNT(*) as count FROM leave_requests").fetchone()['count']
+    pending_hod = conn.execute("SELECT COUNT(*) as count FROM leave_requests WHERE status = 'PENDING_HOD'").fetchone()['count']
+    pending_faculty = conn.execute("SELECT COUNT(*) as count FROM leave_requests WHERE status = 'PENDING_FACULTY'").fetchone()['count']
+    approved_total = conn.execute("SELECT COUNT(*) as count FROM leave_requests WHERE status = 'APPROVED'").fetchone()['count']
+    high_risk_total = conn.execute("SELECT COUNT(*) as count FROM leave_requests WHERE risk_level = 'HIGH_RISK'").fetchone()['count']
+
+    # Escalated queue
+    escalated_requests = LeaveWorkflowManager.get_filtered_leave_requests(conn, role='hod', status_filter='PENDING_HOD')
+
+    # Department-wise Breakdown
+    dept_stats = conn.execute("""
+        SELECT d.name as dept_name,
+               COUNT(lr.id) as total_leaves,
+               SUM(CASE WHEN lr.status = 'APPROVED' THEN 1 ELSE 0 END) as approved_leaves,
+               SUM(CASE WHEN lr.risk_level = 'HIGH_RISK' THEN 1 ELSE 0 END) as high_risk_leaves
+        FROM departments d
+        LEFT JOIN students s ON d.id = s.dept_id
+        LEFT JOIN leave_requests lr ON s.roll_number = lr.roll_number
+        GROUP BY d.id
+    """).fetchall()
+
+    conn.close()
+
+    return render_template('leave_hod_dashboard.html',
+                           total_reqs=total_reqs,
+                           pending_hod=pending_hod,
+                           pending_faculty=pending_faculty,
+                           approved_total=approved_total,
+                           high_risk_total=high_risk_total,
+                           escalated_requests=escalated_requests,
+                           dept_stats=dept_stats)
+
+@app.route('/hod/leave-requests')
+@role_required('admin', 'hod')
+def hod_leave_requests():
+    return redirect(url_for('faculty_leave_dashboard', status='PENDING_HOD'))
+
+
+# --- ADMIN LEAVE CONFIGURATION, TIMETABLE & CALENDAR ---
+
+@app.route('/admin/leave-settings')
+@role_required('admin')
+def admin_leave_settings():
+    conn = get_db_connection()
+    threshold = SystemSettingsManager.get_float(conn, 'attendance_threshold', 75.0)
+    hod_threshold = SystemSettingsManager.get_int(conn, 'hod_approval_days_threshold', 3)
+    duty_comp = SystemSettingsManager.get_setting(conn, 'duty_leave_counts_as_present', '1')
+
+    leave_types = conn.execute("SELECT * FROM leave_types ORDER BY id ASC").fetchall()
+    audit_logs = conn.execute("SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT 30").fetchall()
+    conn.close()
+
+    return render_template('manage_leave_settings.html',
+                           threshold=threshold,
+                           hod_threshold=hod_threshold,
+                           duty_comp=duty_comp,
+                           leave_types=leave_types,
+                           audit_logs=audit_logs)
+
+@app.route('/admin/leave-settings/update-thresholds', methods=['POST'])
+@role_required('admin')
+def update_leave_thresholds():
+    threshold = request.form.get('attendance_threshold', '75.0').strip()
+    hod_days = request.form.get('hod_approval_days_threshold', '3').strip()
+    duty_comp = '1' if 'duty_leave_counts_as_present' in request.form else '0'
+
+    conn = get_db_connection()
+    SystemSettingsManager.set_setting(conn, 'attendance_threshold', threshold, 'University Minimum Attendance Threshold %')
+    SystemSettingsManager.set_setting(conn, 'hod_approval_days_threshold', hod_days, 'Days threshold for mandatory HOD review')
+    SystemSettingsManager.set_setting(conn, 'duty_leave_counts_as_present', duty_comp, 'Whether duty leave is compensated as attended')
+
+    AuditLogger.log(conn, session['user_id'], session['username'], 'UPDATE_SETTINGS', 'system_settings', None,
+                    f"Updated threshold={threshold}%, hod_days={hod_days}, duty_comp={duty_comp}", request.remote_addr)
+    conn.commit()
+    conn.close()
+
+    flash('System settings updated successfully!', 'success')
+    return redirect(url_for('admin_leave_settings'))
+
+@app.route('/admin/leave-settings/leave-type', methods=['POST'])
+@role_required('admin')
+def add_leave_type():
+    name = request.form.get('name', '').strip()
+    code = request.form.get('code', '').strip().upper()
+    description = request.form.get('description', '').strip()
+    max_days = int(request.form.get('max_days', 10))
+    requires_doc = 1 if 'requires_document' in request.form else 0
+    requires_hod = 1 if 'requires_hod_approval' in request.form else 0
+
+    if name and code:
+        conn = get_db_connection()
+        try:
+            conn.execute("""
+                INSERT INTO leave_types (name, code, description, max_days, requires_document, requires_hod_approval)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (name, code, description, max_days, requires_doc, requires_hod))
+            conn.commit()
+            flash('New leave type created successfully!', 'success')
+        except sqlite3.IntegrityError:
+            flash('Leave type name or code already exists.', 'danger')
+        finally:
+            conn.close()
+    else:
+        flash('Name and Code are required.', 'danger')
+
+    return redirect(url_for('admin_leave_settings'))
+
+@app.route('/admin/leave-settings/leave-type/toggle/<int:type_id>', methods=['POST'])
+@role_required('admin')
+def toggle_leave_type(type_id):
+    conn = get_db_connection()
+    lt = conn.execute("SELECT is_active FROM leave_types WHERE id = ?", (type_id,)).fetchone()
+    if lt:
+        new_val = 0 if lt['is_active'] == 1 else 1
+        conn.execute("UPDATE leave_types SET is_active = ? WHERE id = ?", (new_val, type_id))
+        conn.commit()
+        flash('Leave type status updated.', 'info')
+    conn.close()
+    return redirect(url_for('admin_leave_settings'))
+
+@app.route('/admin/timetable', methods=['GET', 'POST'])
+@role_required('admin')
+def manage_timetable():
+    conn = get_db_connection()
+    if request.method == 'POST':
+        course_id = request.form.get('course_id')
+        section_id = request.form.get('section_id')
+        day_of_week = request.form.get('day_of_week')
+        start_time = request.form.get('start_time')
+        end_time = request.form.get('end_time')
+        room = request.form.get('room')
+        teacher_id = request.form.get('teacher_id') or None
+
+        if course_id and section_id and day_of_week and start_time and end_time:
+            conn.execute("""
+                INSERT INTO timetable (course_id, section_id, day_of_week, start_time, end_time, room, teacher_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (int(course_id), int(section_id), day_of_week, start_time, end_time, room, teacher_id))
+            conn.commit()
+            flash('Timetable slot added successfully!', 'success')
+        else:
+            flash('Please complete all required schedule fields.', 'danger')
+
+    timetable_slots = conn.execute("""
+        SELECT t.*, c.course_code, c.course_name, s.section_name, u.full_name as teacher_name
+        FROM timetable t
+        JOIN courses c ON t.course_id = c.id
+        JOIN sections s ON t.section_id = s.id
+        LEFT JOIN users u ON t.teacher_id = u.id
+        ORDER BY CASE t.day_of_week
+            WHEN 'Monday' THEN 1 WHEN 'Tuesday' THEN 2 WHEN 'Wednesday' THEN 3
+            WHEN 'Thursday' THEN 4 WHEN 'Friday' THEN 5 WHEN 'Saturday' THEN 6 ELSE 7 END,
+            t.start_time ASC
+    """).fetchall()
+
+    courses = conn.execute("SELECT * FROM courses ORDER BY course_code ASC").fetchall()
+    sections = conn.execute("SELECT * FROM sections ORDER BY section_name ASC").fetchall()
+    teachers = conn.execute("SELECT * FROM users WHERE role = 'teacher' ORDER BY username ASC").fetchall()
+    conn.close()
+
+    return render_template('manage_leave_settings.html',
+                           tab='timetable',
+                           timetable=timetable_slots,
+                           courses=courses,
+                           sections=sections,
+                           teachers=teachers)
+
+@app.route('/admin/timetable/delete/<int:slot_id>', methods=['POST'])
+@role_required('admin')
+def delete_timetable_slot(slot_id):
+    conn = get_db_connection()
+    conn.execute("DELETE FROM timetable WHERE id = ?", (slot_id,))
+    conn.commit()
+    conn.close()
+    flash('Timetable slot removed.', 'info')
+    return redirect(url_for('manage_timetable'))
+
+@app.route('/admin/holidays', methods=['GET', 'POST'])
+@role_required('admin')
+def manage_holidays():
+    conn = get_db_connection()
+    if request.method == 'POST':
+        event_date = request.form.get('event_date', '').strip()
+        title = request.form.get('title', '').strip()
+        is_holiday = 1 if 'is_holiday' in request.form else 0
+
+        if event_date and title:
+            try:
+                conn.execute("""
+                    INSERT INTO academic_calendar (event_date, title, is_holiday)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(event_date) DO UPDATE SET title = excluded.title, is_holiday = excluded.is_holiday
+                """, (event_date, title, is_holiday))
+                conn.commit()
+                flash('Holiday/Event saved to academic calendar!', 'success')
+            except Exception as e:
+                flash(f'Error saving event: {str(e)}', 'danger')
+        else:
+            flash('Date and Title are required.', 'danger')
+
+    holidays = conn.execute("SELECT * FROM academic_calendar ORDER BY event_date ASC").fetchall()
+    conn.close()
+
+    return render_template('manage_leave_settings.html', tab='holidays', holidays=holidays)
+
+@app.route('/admin/holidays/delete/<int:holiday_id>', methods=['POST'])
+@role_required('admin')
+def delete_holiday(holiday_id):
+    conn = get_db_connection()
+    conn.execute("DELETE FROM academic_calendar WHERE id = ?", (holiday_id,))
+    conn.commit()
+    conn.close()
+    flash('Holiday event removed.', 'info')
+    return redirect(url_for('manage_holidays'))
+
+
+# --- LEAVE REPORTS & EXPORT ENGINE ---
+
+@app.route('/leave/reports')
+@role_required('admin', 'teacher', 'hod')
+def leave_reports():
+    conn = get_db_connection()
+    dept_filter = request.args.get('dept_id', 'ALL')
+    status_filter = request.args.get('status', 'ALL')
+    risk_filter = request.args.get('risk', 'ALL')
+    start_date = request.args.get('start_date', '')
+    end_date = request.args.get('end_date', '')
+
+    requests_list = LeaveWorkflowManager.get_filtered_leave_requests(
+        conn, status_filter=status_filter if status_filter != 'ALL' else None,
+        risk_filter=risk_filter if risk_filter != 'ALL' else None,
+        dept_filter=dept_filter if dept_filter != 'ALL' else None,
+        start_date=start_date if start_date else None,
+        end_date=end_date if end_date else None
+    )
+
+    departments = conn.execute("SELECT * FROM departments ORDER BY name ASC").fetchall()
+    leave_types = conn.execute("SELECT * FROM leave_types ORDER BY name ASC").fetchall()
+    conn.close()
+
+    return render_template('leave_reports.html',
+                           requests=requests_list,
+                           departments=departments,
+                           leave_types=leave_types,
+                           dept_filter=dept_filter,
+                           status_filter=status_filter,
+                           risk_filter=risk_filter,
+                           start_date=start_date,
+                           end_date=end_date)
+
+@app.route('/leave/export/<string:export_format>')
+@role_required('admin', 'teacher', 'hod')
+def export_leave_report(export_format):
+    conn = get_db_connection()
+    requests_list = LeaveWorkflowManager.get_filtered_leave_requests(conn)
+    conn.close()
+
+    timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+    if export_format == 'csv':
+        si = StringIO()
+        cw = csv.writer(si)
+        cw.writerow([
+            'Leave ID', 'Roll Number', 'Student Name', 'Department', 'Section',
+            'Leave Type', 'Start Date', 'End Date', 'Total Days', 'Affected Classes',
+            'Current Attendance %', 'Projected Attendance %', 'Risk Level', 'Status', 'Reason', 'Applied At'
+        ])
+        for r in requests_list:
+            cw.writerow([
+                f"#LEAVE-{r['id']}", r['roll_number'], r.get('student_name', ''), r.get('dept_name', ''),
+                r.get('section_name', ''), r.get('leave_type_name', ''), r['start_date'], r['end_date'],
+                r['total_days'], r['affected_classes'], f"{r['current_attendance_pct']}%",
+                f"{r['projected_attendance_pct']}%", r['risk_level'], r['status'], r['reason'], r['created_at']
+            ])
+        output = make_response(si.getvalue())
+        output.headers["Content-Disposition"] = f"attachment; filename=leave_impact_report_{timestamp_str}.csv"
+        output.headers["Content-type"] = "text/csv; charset=utf-8"
+        return output
+
+    elif export_format == 'json':
+        output = make_response(json.dumps(requests_list, indent=2, default=str))
+        output.headers["Content-Disposition"] = f"attachment; filename=leave_impact_report_{timestamp_str}.json"
+        output.headers["Content-type"] = "application/json"
+        return output
+
+    elif export_format == 'excel':
+        df = pd.DataFrame(requests_list)
+        out = BytesIO()
+        with pd.ExcelWriter(out, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Leave_Impact_Report')
+        output = make_response(out.getvalue())
+        output.headers["Content-Disposition"] = f"attachment; filename=leave_impact_report_{timestamp_str}.xlsx"
+        output.headers["Content-type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        return output
+
+    flash('Unsupported export format.', 'danger')
+    return redirect(url_for('leave_reports'))
+
+
+# --- IN-APP NOTIFICATIONS & SECURE DOCUMENT VIEWING ---
+
+@app.route('/api/notifications')
+@role_required('admin', 'student', 'teacher', 'hod')
+def api_get_notifications():
+    conn = get_db_connection()
+    notifs = NotificationManager.get_user_notifications(conn, session['user_id'], limit=15)
+    unread = NotificationManager.get_unread_count(conn, session['user_id'])
+    conn.close()
+    return jsonify({'notifications': [dict(n) for n in notifs], 'unread_count': unread})
+
+@app.route('/api/notifications/read/<int:notif_id>', methods=['POST'])
+@role_required('admin', 'student', 'teacher', 'hod')
+def api_mark_notif_read(notif_id):
+    conn = get_db_connection()
+    NotificationManager.mark_as_read(conn, notif_id, session['user_id'])
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
+@app.route('/api/notifications/read-all', methods=['POST'])
+@role_required('admin', 'student', 'teacher', 'hod')
+def api_mark_all_notifs_read():
+    conn = get_db_connection()
+    NotificationManager.mark_all_as_read(conn, session['user_id'])
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
+@app.route('/leave/document/<int:doc_id>')
+@role_required('admin', 'student', 'teacher', 'hod')
+def view_leave_document(doc_id):
+    """Secure, authenticated document download/view route."""
+    conn = get_db_connection()
+    doc = conn.execute("SELECT ld.*, lr.roll_number FROM leave_documents ld JOIN leave_requests lr ON ld.leave_request_id = lr.id WHERE ld.id = ?", (doc_id,)).fetchone()
+    conn.close()
+
+    if not doc:
+        flash('Document not found.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    # Security check: Students can only view their own uploaded documents
+    if session.get('role') == 'student' and doc['roll_number'] != session.get('username'):
+        flash('Unauthorized: You cannot access other students’ documents.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    file_path = doc['file_path']
+    if not os.path.exists(file_path):
+        flash('Document file is missing from storage.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    return send_file(file_path, as_attachment=False, download_name=doc['original_filename'])
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))

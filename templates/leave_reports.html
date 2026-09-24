@@ -1,0 +1,177 @@
+{% extends 'base.html' %}
+
+{% block title %}Leave &amp; Attendance Impact Reports{% endblock %}
+
+{% block content %}
+<div class="container container-wide">
+
+  <!-- Header -->
+  <div class="ai-header-bar">
+    <div>
+      <div class="ai-chip">
+        <i class="fa-solid fa-file-invoice"></i> University Reporting Engine
+      </div>
+      <h1 class="ai-title">
+        Leave &amp; Attendance Impact Analytics Reports
+      </h1>
+      <p class="ai-subtitle">
+        Generate and export comprehensive reports for students, departments, leave categories, and attendance defaulter forecasts.
+      </p>
+    </div>
+
+    <div class="ai-action-buttons">
+      <a href="{{ url_for('export_leave_report', export_format='csv') }}" class="btn btn-secondary btn-sm" title="Export CSV">
+        <i class="fa-solid fa-file-csv"></i> CSV
+      </a>
+      <a href="{{ url_for('export_leave_report', export_format='excel') }}" class="btn btn-primary btn-sm" style="background: #10b981; border-color: #10b981;" title="Export Excel XLSX">
+        <i class="fa-solid fa-file-excel"></i> Excel
+      </a>
+      <a href="{{ url_for('export_leave_report', export_format='json') }}" class="btn btn-secondary btn-sm" title="Export JSON">
+        <i class="fa-solid fa-code"></i> JSON
+      </a>
+      <button type="button" class="btn btn-secondary btn-sm" onclick="window.print()" title="Print / PDF">
+        <i class="fa-solid fa-print"></i> Print
+      </button>
+    </div>
+  </div>
+
+  <!-- Filter Toolbar -->
+  <div class="card" style="padding: 1.25rem; margin-bottom: 2rem;">
+    <form method="GET" action="{{ url_for('leave_reports') }}" class="ai-filter-form">
+      
+      <div class="ai-filter-group" style="flex: 1; min-width: 160px;">
+        <label><i class="fa-solid fa-building"></i> Department</label>
+        <select name="dept_id" class="form-control" onchange="this.form.submit()">
+          <option value="ALL" {% if dept_filter == 'ALL' %}selected{% endif %}>All Departments</option>
+          {% for d in departments %}
+            <option value="{{ d.id }}" {% if dept_filter == d.id|string %}selected{% endif %}>{{ d.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="ai-filter-group" style="flex: 1; min-width: 160px;">
+        <label><i class="fa-solid fa-filter"></i> Status</label>
+        <select name="status" class="form-control" onchange="this.form.submit()">
+          <option value="ALL" {% if status_filter == 'ALL' %}selected{% endif %}>All Statuses</option>
+          <option value="APPROVED" {% if status_filter == 'APPROVED' %}selected{% endif %}>Approved</option>
+          <option value="REJECTED" {% if status_filter == 'REJECTED' %}selected{% endif %}>Rejected</option>
+          <option value="PENDING_FACULTY" {% if status_filter == 'PENDING_FACULTY' %}selected{% endif %}>Pending Faculty</option>
+          <option value="PENDING_HOD" {% if status_filter == 'PENDING_HOD' %}selected{% endif %}>Pending HOD</option>
+        </select>
+      </div>
+
+      <div class="ai-filter-group" style="flex: 1; min-width: 160px;">
+        <label><i class="fa-solid fa-radiation"></i> Risk Level</label>
+        <select name="risk" class="form-control" onchange="this.form.submit()">
+          <option value="ALL" {% if risk_filter == 'ALL' %}selected{% endif %}>All Risk Tiers</option>
+          <option value="HIGH_RISK" {% if risk_filter == 'HIGH_RISK' %}selected{% endif %}>🔴 High Risk (&lt;75%)</option>
+          <option value="WARNING" {% if risk_filter == 'WARNING' %}selected{% endif %}>🟡 Warning (75-80%)</option>
+          <option value="SAFE" {% if risk_filter == 'SAFE' %}selected{% endif %}>🟢 Safe (&ge;80%)</option>
+        </select>
+      </div>
+
+      <div class="ai-filter-group" style="flex: 1; min-width: 140px;">
+        <label><i class="fa-solid fa-calendar"></i> From Date</label>
+        <input type="date" name="start_date" class="form-control" value="{{ start_date }}" onchange="this.form.submit()">
+      </div>
+
+      <div class="ai-filter-group" style="flex: 1; min-width: 140px;">
+        <label><i class="fa-solid fa-calendar"></i> To Date</label>
+        <input type="date" name="end_date" class="form-control" value="{{ end_date }}" onchange="this.form.submit()">
+      </div>
+
+      <div style="display: flex; gap: 0.5rem; align-items: flex-end;">
+        <a href="{{ url_for('leave_reports') }}" class="btn btn-secondary" style="height: 42px;" title="Reset"><i class="fa-solid fa-arrows-rotate"></i></a>
+      </div>
+
+    </form>
+  </div>
+
+  <!-- Report Table -->
+  <div class="card" style="padding: 1.5rem;">
+    <div class="card-header" style="border-bottom: 1px solid var(--border-glass); padding-bottom: 1rem; margin-bottom: 1rem;">
+      <h2 class="card-title">
+        <i class="fa-solid fa-table" style="color: var(--secondary);"></i> 
+        Leave Impact Report ({{ requests|length }} matching records)
+      </h2>
+    </div>
+
+    {% if requests %}
+      <div class="table-responsive">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Roll Number</th>
+              <th>Student Name</th>
+              <th>Department</th>
+              <th>Category</th>
+              <th>Leave Dates</th>
+              <th>Total Days</th>
+              <th>Missed Slots</th>
+              <th>Current %</th>
+              <th>Projected %</th>
+              <th>Risk Tier</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in requests %}
+              <tr>
+                <td><strong>#LEAVE-{{ r.id }}</strong></td>
+                <td><code style="color: var(--secondary);">{{ r.roll_number }}</code></td>
+                <td>{{ r.student_name or r.roll_number }}</td>
+                <td>{{ r.dept_name or 'General' }}</td>
+                <td><span class="ai-micro-tag tag-success">{{ r.leave_type_name }}</span></td>
+                <td style="font-family: var(--font-mono); font-size: 0.82rem;">{{ r.start_date }} &rarr; {{ r.end_date }}</td>
+                <td>{{ r.total_days }}d</td>
+                <td style="font-weight: 700; color: #f59e0b;">{{ r.affected_classes }}</td>
+                <td>
+                  <span class="ai-rate-val {% if r.current_attendance_pct < 75 %}text-danger{% else %}text-success{% endif %}">
+                    {{ r.current_attendance_pct }}%
+                  </span>
+                </td>
+                <td>
+                  <span class="ai-projected-val {% if r.projected_attendance_pct < 75 %}text-danger{% else %}text-success{% endif %}">
+                    {{ r.projected_attendance_pct }}%
+                  </span>
+                </td>
+                <td>
+                  {% if r.risk_level == 'HIGH_RISK' %}
+                    <span class="badge badge-ai-critical">High Risk</span>
+                  {% elif r.risk_level == 'WARNING' %}
+                    <span class="badge badge-ai-moderate">Warning</span>
+                  {% else %}
+                    <span class="badge badge-ai-safe">Safe</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if r.status == 'APPROVED' %}
+                    <span class="badge badge-status-approved">Approved</span>
+                  {% elif r.status == 'REJECTED' %}
+                    <span class="badge badge-status-rejected">Rejected</span>
+                  {% elif r.status == 'PENDING_HOD' %}
+                    <span class="badge badge-status-pending-hod">In HOD Queue</span>
+                  {% else %}
+                    <span class="badge badge-status-pending-faculty">In Review</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div style="text-align: center; padding: 3rem 1rem;">
+        <i class="fa-solid fa-file-circle-question" style="font-size: 2.5rem; color: var(--text-dim); margin-bottom: 0.75rem;"></i>
+        <h3 style="color: #ffffff; font-weight: 700;">No Report Data Available</h3>
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 0.25rem;">
+          No leave applications match the selected department, risk level, and date criteria.
+        </p>
+      </div>
+    {% endif %}
+
+  </div>
+
+</div>
+{% endblock %}

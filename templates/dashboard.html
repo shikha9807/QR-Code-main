@@ -56,6 +56,36 @@
     </div>
   </div>
 
+  <!-- AI Predictive Early Warning Alert Banner -->
+  {% if ai_summary %}
+  <div class="ai-alert-banner">
+    <div style="display: flex; align-items: center; gap: 1rem;">
+      <div class="stat-icon" style="background: rgba(168, 85, 247, 0.25); color: #c084fc; width: 48px; height: 48px; font-size: 1.35rem;">
+        <i class="fa-solid fa-brain"></i>
+      </div>
+      <div>
+        <div style="font-weight: 800; color: #ffffff; font-size: 1.05rem;">
+          AI Early Warning Alert: 
+          {% if ai_summary.critical_count > 0 %}
+            <span style="color: #ef4444;"><i class="fa-solid fa-triangle-exclamation"></i> {{ ai_summary.critical_count }} Critical Defaulter{% if ai_summary.critical_count > 1 %}s{% endif %}</span>
+          {% else %}
+            <span style="color: #10b981;"><i class="fa-solid fa-circle-check"></i> All Students in Good Standing</span>
+          {% endif %}
+        </div>
+        <div style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.15rem;">
+          {{ ai_summary.moderate_count }} students on borderline warning &bull; Projected semester average: {{ ai_summary.avg_attendance }}%
+        </div>
+      </div>
+    </div>
+
+    <div style="display: flex; gap: 0.5rem;">
+      <a href="{{ url_for('ai_risk_analytics') }}" class="btn btn-primary btn-sm" style="background: linear-gradient(135deg, #a855f7, #6366f1); box-shadow: 0 0 20px rgba(168, 85, 247, 0.3);">
+        <i class="fa-solid fa-chart-pie"></i> View AI Risk Forecast
+      </a>
+    </div>
+  </div>
+  {% endif %}
+
   <!-- Recent Sessions Card -->
   <div class="card">
     <div class="card-header">
