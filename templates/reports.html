@@ -12,13 +12,16 @@
         Attendance Logs &amp; Reports
       </h1>
       <p style="color: var(--text-muted); font-size: 0.95rem; margin-top: 0.2rem;">
-        Detailed audit trail of all sessions and registered attendees.
+        Detailed audit trail of all sessions, registered attendees, face snapshots, and GPS logs.
       </p>
     </div>
 
     <div style="display: flex; gap: 0.75rem;">
       <a href="{{ url_for('dashboard') }}" class="btn btn-secondary btn-sm">
         <i class="fa-solid fa-arrow-left"></i> Back to Dashboard
+      </a>
+      <a href="{{ url_for('import_students') }}" class="btn btn-secondary btn-sm">
+        <i class="fa-solid fa-file-import"></i> Class Rosters
       </a>
       <form method="POST" action="{{ url_for('start_session') }}" style="display: inline;">
         <button type="submit" class="btn btn-primary btn-sm">
@@ -78,8 +81,16 @@
               <a href="{{ url_for('view_session', session_id=rep.session_id) }}" class="btn btn-secondary btn-sm" title="View Session">
                 <i class="fa-solid fa-qrcode"></i> QR View
               </a>
-              <a href="{{ url_for('export_session', session_id=rep.session_id) }}" class="btn btn-primary btn-sm" title="Download CSV">
-                <i class="fa-solid fa-file-arrow-down"></i> Export CSV
+              <form method="POST" action="{{ url_for('send_email_report', session_id=rep.session_id) }}" style="display: inline;">
+                <button type="submit" class="btn btn-secondary btn-sm" title="Email Report">
+                  <i class="fa-solid fa-envelope"></i>
+                </button>
+              </form>
+              <a href="{{ url_for('export_full_roster', session_id=rep.session_id) }}" class="btn btn-secondary btn-sm" title="Download Full Roster CSV">
+                <i class="fa-solid fa-file-excel"></i> Full Roster
+              </a>
+              <a href="{{ url_for('export_session', session_id=rep.session_id) }}" class="btn btn-primary btn-sm" title="Download Present CSV">
+                <i class="fa-solid fa-file-arrow-down"></i> CSV
               </a>
               <form method="POST" action="{{ url_for('delete_session', session_id=rep.session_id) }}" onsubmit="return confirm('Are you sure you want to delete Session #{{ rep.session_id }} and all its attendance records?');" style="display: inline;">
                 <button type="submit" class="btn btn-danger btn-sm" title="Delete Session">
@@ -95,10 +106,11 @@
               <table class="data-table">
                 <thead>
                   <tr>
-                    <th style="width: 60px;">#</th>
-                    <th>Student Name / Roll ID</th>
-                    <th>Recorded Timestamp</th>
-                    <th style="text-align: right; width: 100px;">Action</th>
+                    <th style="width: 50px;">#</th>
+                    <th>Attendee</th>
+                    <th>Timestamp</th>
+                    <th>Verification</th>
+                    <th style="text-align: right; width: 80px;">Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -106,10 +118,30 @@
                     <tr>
                       <td style="font-family: var(--font-mono); color: var(--text-dim);">{{ loop.index }}</td>
                       <td style="font-weight: 600; color: #ffffff;">
-                        <i class="fa-regular fa-user" style="margin-right: 0.4rem; color: var(--secondary);"></i>
-                        {{ student.student_id }}
+                        <div style="display: flex; align-items: center; gap: 0.6rem;">
+                          {% if student.photo_path %}
+                            <img src="{{ student.photo_path }}" alt="Photo" onclick="openReportPhotoModal('{{ student.photo_path }}', '{{ student.student_id }}')" style="width: 32px; height: 32px; border-radius: 50%; object-fit: cover; border: 2px solid var(--primary); cursor: pointer;" title="Click to expand">
+                          {% else %}
+                            <div class="attendee-avatar" style="width: 30px; height: 30px; font-size: 0.75rem;">
+                              {{ student.student_id[0] | upper }}
+                            </div>
+                          {% endif %}
+                          <span>{{ student.student_id }}</span>
+                        </div>
                       </td>
                       <td style="font-family: var(--font-mono); font-size: 0.88rem;">{{ student.timestamp }}</td>
+                      <td>
+                        <div style="display: flex; gap: 0.35rem; align-items: center;">
+                          {% if student.photo_path and student.face_verified %}
+                            <span class="badge badge-active" title="Face Detected"><i class="fa-solid fa-camera"></i> Face OK</span>
+                          {% endif %}
+                          {% if student.distance_meters is not none %}
+                            <span class="badge badge-active" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.3);"><i class="fa-solid fa-location-dot"></i> {{ student.distance_meters | int }}m</span>
+                          {% else %}
+                            <span class="badge badge-active">Recorded</span>
+                          {% endif %}
+                        </div>
+                      </td>
                       <td style="text-align: right;">
                         <form method="POST" action="{{ url_for('delete_attendance', session_id=rep.session_id, attendance_id=student.id) }}" onsubmit="return confirm('Remove this attendance record?');" style="display: inline;">
                           <button type="submit" class="btn btn-danger btn-sm" style="padding: 0.25rem 0.6rem; font-size: 0.78rem;" title="Remove Record">
@@ -144,4 +176,31 @@
   {% endif %}
 
 </div>
+
+<!-- Photo Lightbox Modal -->
+<div id="report-photo-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.85); backdrop-filter: blur(8px); z-index: 9999; align-items: center; justify-content: center;" onclick="closeReportPhotoModal()">
+  <div class="card" style="max-width: 440px; padding: 1.5rem; text-align: center;" onclick="event.stopPropagation();">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+      <h3 id="report-modal-name" style="color: #ffffff; font-size: 1.1rem; font-weight: 700;"></h3>
+      <button type="button" class="btn btn-secondary btn-sm" onclick="closeReportPhotoModal()">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+    <img id="report-modal-img" src="" alt="Student Selfie" style="width: 100%; border-radius: var(--radius-md); max-height: 380px; object-fit: cover;">
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  function openReportPhotoModal(photoUrl, studentName) {
+    document.getElementById('report-modal-img').src = photoUrl;
+    document.getElementById('report-modal-name').textContent = studentName;
+    document.getElementById('report-photo-modal').style.display = 'flex';
+  }
+
+  function closeReportPhotoModal() {
+    document.getElementById('report-photo-modal').style.display = 'none';
+  }
+</script>
 {% endblock %}

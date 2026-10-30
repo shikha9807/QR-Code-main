@@ -6,27 +6,69 @@
   <title>Mark Attendance - QR Portal</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <style>
+    .camera-container {
+      position: relative;
+      width: 100%;
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      background: #0f172a;
+      margin-bottom: 1.25rem;
+      border: 1px dashed var(--border-glass);
+      text-align: center;
+    }
+    #camera-video, #photo-preview {
+      width: 100%;
+      max-height: 240px;
+      object-fit: cover;
+      border-radius: var(--radius-md);
+      display: block;
+    }
+    .camera-overlay {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 140px;
+      height: 180px;
+      border: 2px dashed rgba(99, 102, 241, 0.6);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+    .geo-status-box {
+      padding: 0.65rem 0.9rem;
+      border-radius: var(--radius-md);
+      font-size: 0.82rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 1.25rem;
+      background: rgba(99, 102, 241, 0.08);
+      border: 1px solid rgba(99, 102, 241, 0.2);
+      color: #a5b4fc;
+    }
+  </style>
 </head>
 <body style="display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 1.5rem;">
   
   <div class="container container-narrow">
-    <div class="card" style="padding: 2.5rem 2rem;">
+    <div class="card" style="padding: 2.2rem 1.75rem;">
       
       <!-- Top Branding -->
-      <div style="text-align: center; margin-bottom: 2rem;">
-        <div class="brand-badge" style="width: 56px; height: 56px; font-size: 1.8rem; margin: 0 auto 1rem; border-radius: 14px;">
+      <div style="text-align: center; margin-bottom: 1.5rem;">
+        <div class="brand-badge" style="width: 54px; height: 54px; font-size: 1.75rem; margin: 0 auto 0.75rem; border-radius: 14px;">
           <i class="fa-solid fa-id-card-clip"></i>
         </div>
-        <h1 style="font-size: 1.65rem; font-weight: 800; color: #ffffff; letter-spacing: -0.02em;">
+        <h1 style="font-size: 1.55rem; font-weight: 800; color: #ffffff; letter-spacing: -0.02em;">
           Student Attendance
         </h1>
-        <p style="color: var(--text-muted); font-size: 0.92rem; margin-top: 0.35rem;">
-          Session Verified &bull; Enter your details to confirm your attendance
+        <p style="color: var(--text-muted); font-size: 0.88rem; margin-top: 0.2rem;">
+          Session Verified &bull; Enter details to record your attendance
         </p>
       </div>
 
       <!-- Session Info Pill -->
-      <div style="margin-bottom: 1.75rem; padding: 0.85rem 1rem; background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: var(--radius-md); display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem;">
+      <div style="margin-bottom: 1.25rem; padding: 0.75rem 1rem; background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: var(--radius-md); display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem;">
         <span style="color: var(--text-muted);">
           <i class="fa-regular fa-clock"></i> Active Session
         </span>
@@ -35,8 +77,27 @@
         </span>
       </div>
 
+      <!-- Geo-Fencing Indicator -->
+      <div id="geo-box" class="geo-status-box">
+        <i class="fa-solid fa-location-crosshairs fa-spin" id="geo-icon"></i>
+        <span id="geo-msg">
+          {% if current_session.geofence_enabled %}
+            Acquiring classroom GPS coordinates...
+          {% else %}
+            Standard GPS verification active.
+          {% endif %}
+        </span>
+      </div>
+
       <!-- Submission Form -->
-      <form method="POST" action="{{ url_for('mark_attendance', token=token) }}">
+      <form id="attendance-form" method="POST" action="{{ url_for('mark_attendance', token=token) }}">
+        
+        <!-- Hidden Lat/Lon & Photo Data -->
+        <input type="hidden" id="latitude" name="latitude" value="">
+        <input type="hidden" id="longitude" name="longitude" value="">
+        <input type="hidden" id="photo_data" name="photo_data" value="">
+
+        <!-- Student Name / Roll Number -->
         <div class="form-group">
           <label class="form-label" for="student_name">
             <i class="fa-solid fa-user-graduate"></i> Full Name or Student / Roll ID
@@ -46,19 +107,53 @@
             id="student_name" 
             name="student_name" 
             class="form-control" 
-            placeholder="e.g. John Doe (CS-2024-042)" 
+            placeholder="e.g. CS2024-042 or John Doe" 
             required 
             autofocus
             autocomplete="name"
           >
         </div>
 
-        <div style="margin-top: 0.5rem; margin-bottom: 1.5rem; font-size: 0.8rem; color: var(--text-dim); display: flex; align-items: center; gap: 0.4rem;">
-          <i class="fa-solid fa-shield-halved" style="color: var(--primary);"></i>
-          <span>Single submission enforced per device.</span>
+        <!-- Live Face / Selfie Capture Component -->
+        <div class="form-group">
+          <label class="form-label" style="display: flex; justify-content: space-between; align-items: center;">
+            <span><i class="fa-solid fa-camera"></i> Face Verification Photo</span>
+            <span id="photo-status" style="font-size: 0.78rem; color: #a5b4fc; font-weight: 500;">Optional / Recommended</span>
+          </label>
+          
+          <div class="camera-container" id="camera-box">
+            <video id="camera-video" autoplay playsinline muted style="display: none;"></video>
+            <img id="photo-preview" src="" alt="Captured Photo Preview" style="display: none;">
+            <div id="camera-overlay" class="camera-overlay" style="display: none;"></div>
+            
+            <div id="camera-placeholder" style="padding: 1.5rem 1rem;">
+              <i class="fa-solid fa-camera-rotate" style="font-size: 2rem; color: var(--text-dim); margin-bottom: 0.5rem;"></i>
+              <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+                Take a quick selfie to verify your physical attendance in class.
+              </p>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="startCamera()">
+                <i class="fa-solid fa-video"></i> Open Live Camera
+              </button>
+            </div>
+          </div>
+
+          <!-- Camera Action Controls -->
+          <div id="camera-controls" style="display: none; gap: 0.5rem; justify-content: center; margin-bottom: 1rem;">
+            <button type="button" id="snap-btn" class="btn btn-primary btn-sm" onclick="capturePhoto()">
+              <i class="fa-solid fa-camera"></i> Snap Photo
+            </button>
+            <button type="button" id="retake-btn" class="btn btn-secondary btn-sm" onclick="retakePhoto()" style="display: none;">
+              <i class="fa-solid fa-rotate-left"></i> Retake
+            </button>
+          </div>
         </div>
 
-        <button type="submit" class="btn btn-primary btn-block btn-lg">
+        <div style="margin-top: 0.25rem; margin-bottom: 1.25rem; font-size: 0.8rem; color: var(--text-dim); display: flex; align-items: center; gap: 0.4rem;">
+          <i class="fa-solid fa-shield-halved" style="color: var(--primary);"></i>
+          <span>Single submission per device enforced by security cookie.</span>
+        </div>
+
+        <button type="submit" id="submit-btn" class="btn btn-primary btn-block btn-lg">
           <i class="fa-solid fa-check"></i> Submit Attendance
         </button>
       </form>
@@ -66,5 +161,116 @@
     </div>
   </div>
 
+  <canvas id="photo-canvas" style="display: none;"></canvas>
+
+  <script>
+    let videoStream = null;
+
+    // 1. GPS Geolocation Acquisition
+    function initGeolocation() {
+      const geoBox = document.getElementById('geo-box');
+      const geoIcon = document.getElementById('geo-icon');
+      const geoMsg = document.getElementById('geo-msg');
+      const latInput = document.getElementById('latitude');
+      const lonInput = document.getElementById('longitude');
+
+      if ("geolocation" in navigator) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            latInput.value = pos.coords.latitude;
+            lonInput.value = pos.coords.longitude;
+            geoIcon.className = "fa-solid fa-location-dot";
+            geoIcon.style.color = "#10b981";
+            geoMsg.innerHTML = `<span style="color: #6ee7b7; font-weight: 600;">GPS Location Acquired (Accuracy: ±${Math.round(pos.coords.accuracy)}m)</span>`;
+            geoBox.style.borderColor = "rgba(16, 185, 129, 0.4)";
+          },
+          (err) => {
+            console.warn("GPS Location error:", err);
+            geoIcon.className = "fa-solid fa-triangle-exclamation";
+            geoIcon.style.color = "#f59e0b";
+            geoMsg.innerHTML = `<span style="color: #fcd34d;">GPS not acquired (${err.message}). If Geo-Fencing is enabled, submit may require location permissions.</span>`;
+          },
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+        );
+      } else {
+        geoMsg.textContent = "Geolocation not supported on this browser.";
+      }
+    }
+
+    // 2. Camera Functions
+    async function startCamera() {
+      const video = document.getElementById('camera-video');
+      const placeholder = document.getElementById('camera-placeholder');
+      const overlay = document.getElementById('camera-overlay');
+      const controls = document.getElementById('camera-controls');
+      const snapBtn = document.getElementById('snap-btn');
+      const retakeBtn = document.getElementById('retake-btn');
+
+      try {
+        videoStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+          audio: false
+        });
+        video.srcObject = videoStream;
+        video.style.display = 'block';
+        placeholder.style.display = 'none';
+        overlay.style.display = 'block';
+        controls.style.display = 'flex';
+        snapBtn.style.display = 'inline-flex';
+        retakeBtn.style.display = 'none';
+      } catch (err) {
+        console.error("Camera access error:", err);
+        alert("Camera permission denied or camera unavailable. You can still submit attendance with student roll number.");
+      }
+    }
+
+    function capturePhoto() {
+      const video = document.getElementById('camera-video');
+      const canvas = document.getElementById('photo-canvas');
+      const preview = document.getElementById('photo-preview');
+      const overlay = document.getElementById('camera-overlay');
+      const snapBtn = document.getElementById('snap-btn');
+      const retakeBtn = document.getElementById('retake-btn');
+      const photoDataInput = document.getElementById('photo_data');
+      const photoStatus = document.getElementById('photo-status');
+
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      const base64Image = canvas.toDataURL('image/jpeg', 0.85);
+      photoDataInput.value = base64Image;
+
+      // Stop camera stream
+      if (videoStream) {
+        videoStream.getTracks().forEach(track => track.stop());
+      }
+
+      video.style.display = 'none';
+      overlay.style.display = 'none';
+      preview.src = base64Image;
+      preview.style.display = 'block';
+
+      snapBtn.style.display = 'none';
+      retakeBtn.style.display = 'inline-flex';
+      photoStatus.innerHTML = '<span style="color: #34d399; font-weight: 700;">✅ Photo Attached</span>';
+    }
+
+    function retakePhoto() {
+      const preview = document.getElementById('photo-preview');
+      const photoDataInput = document.getElementById('photo_data');
+      const photoStatus = document.getElementById('photo-status');
+
+      preview.style.display = 'none';
+      photoDataInput.value = '';
+      photoStatus.textContent = 'Optional / Recommended';
+      startCamera();
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      initGeolocation();
+    });
+  </script>
 </body>
 </html>
