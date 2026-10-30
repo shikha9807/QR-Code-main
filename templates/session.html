@@ -5,7 +5,7 @@
 {% block content %}
 <div class="container container-wide">
 
-  <!-- Top bar with Back Button & Session Actions -->
+  <!-- Top bar with Back Button & Session Meta -->
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
     <div style="display: flex; align-items: center; gap: 1rem;">
       <a href="{{ url_for('dashboard') }}" class="btn btn-secondary btn-sm">
@@ -17,59 +17,17 @@
         </h1>
         <span style="font-size: 0.85rem; color: var(--text-muted);">
           Created: {{ current_session.created_at }} &bull; Valid for 10 minutes
-          {% if current_session.geofence_enabled %}
-            &bull; <span style="color: #34d399;"><i class="fa-solid fa-location-crosshairs"></i> Geo-Fencing Active ({{ current_session.radius_meters | int }}m)</span>
-          {% endif %}
         </span>
       </div>
     </div>
 
-    <!-- Quick Action Toolbar -->
-    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-      <form method="POST" action="{{ url_for('send_email_report', session_id=current_session.id) }}" style="display: inline;">
-        <button type="submit" class="btn btn-secondary btn-sm" title="Email summary and CSV to instructor">
-          <i class="fa-solid fa-envelope"></i> Email Report
-        </button>
-      </form>
-      <a href="{{ url_for('export_full_roster', session_id=current_session.id) }}" class="btn btn-secondary btn-sm" title="Download Present + Absent CSV">
-        <i class="fa-solid fa-file-excel"></i> Full Roster CSV
+    <div style="display: flex; gap: 0.75rem;">
+      <a href="{{ url_for('export_session', session_id=current_session.id) }}" class="btn btn-secondary btn-sm">
+        <i class="fa-solid fa-file-arrow-down"></i> Export CSV
       </a>
-      <a href="{{ url_for('export_session', session_id=current_session.id) }}" class="btn btn-primary btn-sm" title="Download Present-only CSV">
-        <i class="fa-solid fa-file-arrow-down"></i> Present CSV
+      <a href="{{ url_for('reports') }}" class="btn btn-secondary btn-sm">
+        <i class="fa-solid fa-clipboard-list"></i> Full Report
       </a>
-    </div>
-  </div>
-
-  <!-- Real-time Metrics Banner -->
-  <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: 1.5rem;">
-    <div class="stat-card" style="padding: 1rem 1.25rem;">
-      <div class="stat-icon icon-green" style="width: 42px; height: 42px; font-size: 1.25rem;">
-        <i class="fa-solid fa-user-check"></i>
-      </div>
-      <div class="stat-info">
-        <div class="stat-value" id="metric-present" style="font-size: 1.4rem;">{{ count }}</div>
-        <div class="stat-label">Present</div>
-      </div>
-    </div>
-
-    <div class="stat-card" style="padding: 1rem 1.25rem;">
-      <div class="stat-icon icon-purple" style="width: 42px; height: 42px; font-size: 1.25rem; background: rgba(239, 68, 68, 0.15); color: #f87171;">
-        <i class="fa-solid fa-user-xmark"></i>
-      </div>
-      <div class="stat-info">
-        <div class="stat-value" id="metric-absent" style="font-size: 1.4rem; color: #f87171;">{{ absent_count }}</div>
-        <div class="stat-label">Absent</div>
-      </div>
-    </div>
-
-    <div class="stat-card" style="padding: 1rem 1.25rem;">
-      <div class="stat-icon icon-cyan" style="width: 42px; height: 42px; font-size: 1.25rem;">
-        <i class="fa-solid fa-chart-pie"></i>
-      </div>
-      <div class="stat-info">
-        <div class="stat-value" id="metric-rate" style="font-size: 1.4rem;">{{ attendance_rate }}%</div>
-        <div class="stat-label">Attendance Rate</div>
-      </div>
     </div>
   </div>
 
@@ -123,31 +81,27 @@
 
     </div>
 
-    <!-- Real-time Attendance Feed Card (With Tabs) -->
+    <!-- Real-time Attendance Feed Card -->
     <div class="card">
-      <div class="card-header" style="flex-wrap: wrap; gap: 0.75rem;">
-        <div style="display: flex; gap: 0.5rem;">
-          <button type="button" id="tab-present-btn" class="btn btn-primary btn-sm" onclick="switchRosterTab('present')">
-            <i class="fa-solid fa-users"></i> Present (<span id="live-count">{{ count }}</span>)
-          </button>
-          <button type="button" id="tab-absent-btn" class="btn btn-secondary btn-sm" onclick="switchRosterTab('absent')">
-            <i class="fa-solid fa-user-xmark"></i> Absent (<span id="live-absent-count">{{ absent_count }}</span>)
-          </button>
+      <div class="card-header">
+        <div class="card-title">
+          <i class="fa-solid fa-users" style="color: var(--secondary);"></i>
+          <span>Live Attendance (<span id="live-count" style="color: var(--primary);">{{ count }}</span>)</span>
         </div>
         <span style="font-size: 0.8rem; color: var(--text-dim);">
           <i class="fa-solid fa-arrows-rotate fa-spin" style="margin-right: 0.3rem;"></i> Auto-syncing
         </span>
       </div>
 
-      <!-- TAB 1: PRESENT ATTENDEES -->
-      <div id="present-tab-content" style="min-height: 280px;">
+      <!-- Live Attendee Feed -->
+      <div style="min-height: 280px;">
         <div id="empty-attendees" style="text-align: center; padding: 3rem 1rem; {{ 'display: none;' if attendees else '' }}">
           <div style="font-size: 2.5rem; color: var(--text-dim); margin-bottom: 0.75rem;">
             <i class="fa-solid fa-hourglass-start"></i>
           </div>
           <h4 style="color: #ffffff; font-weight: 600;">Waiting for Scans...</h4>
           <p style="color: var(--text-muted); font-size: 0.88rem; margin-top: 0.25rem;">
-            Students who scan the QR code will appear here with selfie &amp; GPS verification.
+            Students who scan the QR code will appear here in real-time.
           </p>
         </div>
 
@@ -155,51 +109,13 @@
           {% for student in attendees %}
             <li class="attendee-item">
               <div style="display: flex; align-items: center; gap: 0.75rem;">
-                {% if student.photo_path %}
-                  <img src="{{ student.photo_path }}" alt="Photo" onclick="openPhotoModal('{{ student.photo_path }}', '{{ student.student_id }}')" style="width: 36px; height: 36px; border-radius: 50%; object-fit: cover; border: 2px solid var(--primary); cursor: pointer;" title="Click to view photo">
-                {% else %}
-                  <div class="attendee-avatar">{{ student.student_id[0] | upper }}</div>
-                {% endif %}
+                <div class="attendee-avatar">{{ student.student_id[0] | upper }}</div>
                 <div>
                   <div style="font-weight: 600; color: #ffffff;">{{ student.student_id }}</div>
-                  <div style="font-size: 0.75rem; color: #64748b;">
-                    {{ student.timestamp }}
-                    {% if student.distance_meters is not none %}
-                      &bull; <span style="color: #38bdf8;"><i class="fa-solid fa-location-dot"></i> {{ student.distance_meters | int }}m</span>
-                    {% endif %}
-                  </div>
+                  <div style="font-size: 0.75rem; color: #64748b;">{{ student.timestamp }}</div>
                 </div>
               </div>
-              <div style="display: flex; gap: 0.35rem; align-items: center;">
-                {% if student.photo_path and student.face_verified %}
-                  <span class="badge badge-active" title="Face verified by OpenCV"><i class="fa-solid fa-camera"></i> Face OK</span>
-                {% endif %}
-                <span class="badge badge-active">Verified</span>
-              </div>
-            </li>
-          {% endfor %}
-        </ul>
-      </div>
-
-      <!-- TAB 2: ABSENT STUDENTS ROSTER -->
-      <div id="absent-tab-content" style="display: none; min-height: 280px;">
-        <ul id="absentee-list" class="attendee-list">
-          {% for student in absentees %}
-            <li class="attendee-item" style="border-left: 3px solid #ef4444;">
-              <div style="display: flex; align-items: center; gap: 0.75rem;">
-                <div class="attendee-avatar" style="background: rgba(239, 68, 68, 0.2); color: #f87171;">
-                  {{ student.roll_number[0] | upper }}
-                </div>
-                <div>
-                  <div style="font-weight: 600; color: #ffffff;">{{ student.full_name }}</div>
-                  <div style="font-size: 0.75rem; color: #64748b; font-family: var(--font-mono);">
-                    {{ student.roll_number }} &bull; {{ student.email }}
-                  </div>
-                </div>
-              </div>
-              <span class="badge badge-expired" style="color: #f87171; border-color: rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.1);">
-                Absent
-              </span>
+              <span class="badge badge-active">Verified</span>
             </li>
           {% endfor %}
         </ul>
@@ -209,54 +125,12 @@
 
   </div>
 
-</div>
-
-<!-- Photo Lightbox Modal -->
-<div id="photo-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.85); backdrop-filter: blur(8px); z-index: 9999; align-items: center; justify-content: center;" onclick="closePhotoModal()">
-  <div class="card" style="max-width: 440px; padding: 1.5rem; text-align: center;" onclick="event.stopPropagation();">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-      <h3 id="modal-student-name" style="color: #ffffff; font-size: 1.1rem; font-weight: 700;"></h3>
-      <button type="button" class="btn btn-secondary btn-sm" onclick="closePhotoModal()">
-        <i class="fa-solid fa-xmark"></i>
-      </button>
-    </div>
-    <img id="modal-photo-img" src="" alt="Student Selfie" style="width: 100%; border-radius: var(--radius-md); max-height: 380px; object-fit: cover;">
-  </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-  function switchRosterTab(tab) {
-    const presentTab = document.getElementById('present-tab-content');
-    const absentTab = document.getElementById('absent-tab-content');
-    const presentBtn = document.getElementById('tab-present-btn');
-    const absentBtn = document.getElementById('tab-absent-btn');
-
-    if (tab === 'present') {
-      presentTab.style.display = 'block';
-      absentTab.style.display = 'none';
-      presentBtn.className = 'btn btn-primary btn-sm';
-      absentBtn.className = 'btn btn-secondary btn-sm';
-    } else {
-      presentTab.style.display = 'none';
-      absentTab.style.display = 'block';
-      presentBtn.className = 'btn btn-secondary btn-sm';
-      absentBtn.className = 'btn btn-primary btn-sm';
-    }
-  }
-
-  function openPhotoModal(photoUrl, studentName) {
-    document.getElementById('modal-photo-img').src = photoUrl;
-    document.getElementById('modal-student-name').textContent = studentName;
-    const modal = document.getElementById('photo-modal');
-    modal.style.display = 'flex';
-  }
-
-  function closePhotoModal() {
-    document.getElementById('photo-modal').style.display = 'none';
-  }
-
+  // Initialize live real-time synchronization
   document.addEventListener('DOMContentLoaded', () => {
     initLiveSession({{ current_session.id }}, {{ remaining_seconds }});
   });

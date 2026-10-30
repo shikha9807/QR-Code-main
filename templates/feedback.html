@@ -26,27 +26,15 @@
         </p>
 
         {% if student_name %}
-          <div style="background: rgba(255, 255, 255, 0.04); border: 1px solid var(--border-glass); border-radius: var(--radius-md); padding: 1.25rem; margin-bottom: 1.75rem; text-align: left;">
-            
-            {% if photo_url %}
-              <div style="text-align: center; margin-bottom: 1rem;">
-                <img src="{{ photo_url }}" alt="Verified Photo" style="width: 84px; height: 84px; border-radius: 50%; object-fit: cover; border: 3px solid #10b981; box-shadow: 0 0 20px rgba(16, 185, 129, 0.4);">
-              </div>
-            {% endif %}
-
+          <div style="background: rgba(255, 255, 255, 0.04); border: 1px solid var(--border-glass); border-radius: var(--radius-md); padding: 1rem; margin-bottom: 2rem; text-align: left;">
             <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem; font-size: 0.88rem;">
               <span style="color: var(--text-muted);">Attendee:</span>
               <span style="color: #ffffff; font-weight: 700;">{{ student_name }}</span>
             </div>
             {% if timestamp %}
-              <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem; font-size: 0.88rem;">
+              <div style="display: flex; justify-content: space-between; font-size: 0.88rem;">
                 <span style="color: var(--text-muted);">Timestamp:</span>
                 <span style="color: var(--text-muted); font-family: var(--font-mono);">{{ timestamp }}</span>
-              </div>
-            {% endif %}
-            {% if extra_info %}
-              <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-glass); font-size: 0.82rem; color: #38bdf8;">
-                {{ extra_info | safe }}
               </div>
             {% endif %}
           </div>

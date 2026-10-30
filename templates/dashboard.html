@@ -16,67 +16,11 @@
       </p>
     </div>
     
-    <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
-      <a href="{{ url_for('import_students') }}" class="btn btn-secondary btn-lg" title="Upload Class Rosters via CSV/Excel">
-        <i class="fa-solid fa-file-import"></i> Batch Roster Import
-      </a>
-      <button type="button" class="btn btn-primary btn-lg" onclick="openStartSessionModal()" style="box-shadow: var(--shadow-glow);">
+    <form method="POST" action="{{ url_for('start_session') }}">
+      <button type="submit" class="btn btn-primary btn-lg" style="box-shadow: var(--shadow-glow);">
         <i class="fa-solid fa-plus-circle"></i> Launch Live QR Session
       </button>
-    </div>
-  </div>
-
-  <!-- Launch Session Modal (With Geo-Fencing Options) -->
-  <div id="start-session-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.8); backdrop-filter: blur(8px); z-index: 9999; align-items: center; justify-content: center;" onclick="closeStartSessionModal()">
-    <div class="card" style="max-width: 500px; width: 90%; padding: 2rem;" onclick="event.stopPropagation();">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
-        <h2 style="font-size: 1.35rem; font-weight: 800; color: #ffffff;">
-          <i class="fa-solid fa-qrcode" style="color: var(--primary);"></i> Launch Attendance Session
-        </h2>
-        <button type="button" class="btn btn-secondary btn-sm" onclick="closeStartSessionModal()">
-          <i class="fa-solid fa-xmark"></i>
-        </button>
-      </div>
-
-      <form method="POST" action="{{ url_for('start_session') }}">
-        
-        <!-- Geo-Fencing Option -->
-        <div style="margin-bottom: 1.25rem; padding: 1rem; background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: var(--radius-md);">
-          <label style="display: flex; align-items: center; gap: 0.6rem; cursor: pointer; font-weight: 700; color: #ffffff; margin-bottom: 0.5rem;">
-            <input type="checkbox" id="enable_geofence" name="geofence_enabled" value="1" onchange="toggleGeofenceFields(this.checked)" style="width: 18px; height: 18px; accent-color: var(--primary);">
-            <span>Enable Classroom Geo-Fencing (GPS Radius)</span>
-          </label>
-          <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem;">
-            Restricts attendance marking to students physically located within the classroom radius.
-          </p>
-
-          <div id="geofence-fields" style="display: none;">
-            <div style="display: flex; gap: 0.5rem; margin-bottom: 0.75rem;">
-              <input type="text" id="dash_lat" name="latitude" class="form-control" placeholder="Latitude" style="font-size: 0.85rem;" readonly>
-              <input type="text" id="dash_lon" name="longitude" class="form-control" placeholder="Longitude" style="font-size: 0.85rem;" readonly>
-            </div>
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-              <button type="button" class="btn btn-secondary btn-sm" onclick="detectTeacherLocation()">
-                <i class="fa-solid fa-crosshairs"></i> Auto-Detect My Location
-              </button>
-              <span id="loc-status" style="font-size: 0.78rem; color: #a5b4fc;"></span>
-            </div>
-            <div class="form-group" style="margin-bottom: 0;">
-              <label class="form-label" style="font-size: 0.82rem;">Allowed Radius (Meters)</label>
-              <select name="radius_meters" class="form-control" style="font-size: 0.85rem;">
-                <option value="50">50 Meters (Small Classroom / Lab)</option>
-                <option value="100" selected>100 Meters (Standard Lecture Hall)</option>
-                <option value="200">200 Meters (Large Campus Auditorium)</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        <button type="submit" class="btn btn-primary btn-block btn-lg">
-          <i class="fa-solid fa-play"></i> Start 10-Minute Session
-        </button>
-      </form>
-    </div>
+    </form>
   </div>
 
   <!-- Stats Grid -->
@@ -216,46 +160,4 @@
 
   </div>
 </div>
-{% endblock %}
-
-{% block scripts %}
-<script>
-  function openStartSessionModal() {
-    document.getElementById('start-session-modal').style.display = 'flex';
-  }
-
-  function closeStartSessionModal() {
-    document.getElementById('start-session-modal').style.display = 'none';
-  }
-
-  function toggleGeofenceFields(enabled) {
-    document.getElementById('geofence-fields').style.display = enabled ? 'block' : 'none';
-    if (enabled && !document.getElementById('dash_lat').value) {
-      detectTeacherLocation();
-    }
-  }
-
-  function detectTeacherLocation() {
-    const status = document.getElementById('loc-status');
-    const latInput = document.getElementById('dash_lat');
-    const lonInput = document.getElementById('dash_lon');
-
-    if ("geolocation" in navigator) {
-      status.textContent = 'Acquiring GPS...';
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          latInput.value = pos.coords.latitude.toFixed(6);
-          lonInput.value = pos.coords.longitude.toFixed(6);
-          status.innerHTML = '<span style="color: #10b981;">📍 Location Set</span>';
-        },
-        (err) => {
-          status.innerHTML = `<span style="color: #ef4444;">${err.message}</span>`;
-        },
-        { enableHighAccuracy: true, timeout: 8000 }
-      );
-    } else {
-      status.textContent = 'GPS not supported.';
-    }
-  }
-</script>
 {% endblock %}

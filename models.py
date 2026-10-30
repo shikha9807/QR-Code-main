@@ -83,24 +83,6 @@ def init_db():
     )
     ''')
 
-    cursor.execute("PRAGMA table_info(students)")
-    existing_student_cols = {col['name'] for col in cursor.fetchall()}
-    student_academic_cols = {
-        'total_classes': 'INTEGER',
-        'classes_attended': 'INTEGER',
-        'classes_missed': 'INTEGER',
-        'attendance_percentage': 'REAL',
-        'predicted_status': 'TEXT',
-        'predicted_risk_tier': 'TEXT',
-        'risk_score': 'REAL',
-        'projected_final_attendance': 'REAL',
-        'confidence_score': 'REAL',
-        'prescriptive_action_plan': 'TEXT',
-    }
-    for col_name, col_type in student_academic_cols.items():
-        if col_name not in existing_student_cols:
-            cursor.execute(f"ALTER TABLE students ADD COLUMN {col_name} {col_type}")
-
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS teacher_assignments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -136,32 +118,9 @@ def init_db():
         expiry_time DATETIME NOT NULL,
         token TEXT UNIQUE NOT NULL,
         status TEXT DEFAULT 'active',
-        geofence_enabled INTEGER DEFAULT 0,
-        latitude REAL,
-        longitude REAL,
-        radius_meters REAL DEFAULT 100.0,
-        course_id INTEGER,
-        section_id INTEGER,
-        FOREIGN KEY (teacher_id) REFERENCES users (id),
-        FOREIGN KEY (course_id) REFERENCES courses (id),
-        FOREIGN KEY (section_id) REFERENCES sections (id)
+        FOREIGN KEY (teacher_id) REFERENCES users (id)
     )
     ''')
-
-    cursor.execute("PRAGMA table_info(sessions)")
-    existing_sess_cols = {col['name'] for col in cursor.fetchall()}
-    if 'geofence_enabled' not in existing_sess_cols:
-        cursor.execute("ALTER TABLE sessions ADD COLUMN geofence_enabled INTEGER DEFAULT 0")
-    if 'latitude' not in existing_sess_cols:
-        cursor.execute("ALTER TABLE sessions ADD COLUMN latitude REAL")
-    if 'longitude' not in existing_sess_cols:
-        cursor.execute("ALTER TABLE sessions ADD COLUMN longitude REAL")
-    if 'radius_meters' not in existing_sess_cols:
-        cursor.execute("ALTER TABLE sessions ADD COLUMN radius_meters REAL DEFAULT 100.0")
-    if 'course_id' not in existing_sess_cols:
-        cursor.execute("ALTER TABLE sessions ADD COLUMN course_id INTEGER")
-    if 'section_id' not in existing_sess_cols:
-        cursor.execute("ALTER TABLE sessions ADD COLUMN section_id INTEGER")
 
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS attendance (
@@ -169,28 +128,10 @@ def init_db():
         session_id INTEGER,
         student_id TEXT NOT NULL,
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-        photo_path TEXT,
-        face_verified INTEGER DEFAULT 1,
-        latitude REAL,
-        longitude REAL,
-        distance_meters REAL,
         UNIQUE(session_id, student_id),
         FOREIGN KEY (session_id) REFERENCES sessions (id)
     )
     ''')
-
-    cursor.execute("PRAGMA table_info(attendance)")
-    existing_att_cols = {col['name'] for col in cursor.fetchall()}
-    if 'photo_path' not in existing_att_cols:
-        cursor.execute("ALTER TABLE attendance ADD COLUMN photo_path TEXT")
-    if 'face_verified' not in existing_att_cols:
-        cursor.execute("ALTER TABLE attendance ADD COLUMN face_verified INTEGER DEFAULT 1")
-    if 'latitude' not in existing_att_cols:
-        cursor.execute("ALTER TABLE attendance ADD COLUMN latitude REAL")
-    if 'longitude' not in existing_att_cols:
-        cursor.execute("ALTER TABLE attendance ADD COLUMN longitude REAL")
-    if 'distance_meters' not in existing_att_cols:
-        cursor.execute("ALTER TABLE attendance ADD COLUMN distance_meters REAL")
 
     # 4. System Settings Table (Configurable Attendance threshold, HOD rules, etc.)
     cursor.execute('''

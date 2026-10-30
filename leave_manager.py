@@ -150,32 +150,14 @@ class LeaveCalculator:
     @staticmethod
     def get_student_attendance_summary(conn, roll_number):
         """Returns attended and conducted session counts for a student."""
-        student = conn.execute(
-            "SELECT total_classes, classes_attended, attendance_percentage FROM students WHERE roll_number = ?",
-            (roll_number,)
-        ).fetchone()
-        academic_total = int(student['total_classes'] or 0) if student and student['total_classes'] is not None else 0
-        academic_attended = int(student['classes_attended'] or 0) if student and student['classes_attended'] is not None else 0
+        total_sessions_row = conn.execute("SELECT COUNT(*) as count FROM sessions").fetchone()
+        total_conducted = total_sessions_row['count'] if total_sessions_row else 0
 
-        qr_sessions_row = conn.execute("""
-            SELECT COUNT(*) as count FROM sessions s
-            WHERE EXISTS (SELECT 1 FROM attendance a WHERE a.session_id = s.id)
-        """).fetchone()
-        qr_conducted = qr_sessions_row['count'] if qr_sessions_row else 0
-
-        attended_row = conn.execute(
-            "SELECT COUNT(DISTINCT session_id) as count FROM attendance WHERE student_id = ?",
-            (roll_number,)
-        ).fetchone()
-        qr_attended = attended_row['count'] if attended_row else 0
-
-        total_conducted = academic_total + qr_conducted
-        attended_count = academic_attended + qr_attended
+        attended_row = conn.execute("SELECT COUNT(DISTINCT session_id) as count FROM attendance WHERE student_id = ?", (roll_number,)).fetchone()
+        attended_count = attended_row['count'] if attended_row else 0
 
         if total_conducted == 0:
             current_pct = 100.0
-        elif academic_total and not qr_conducted and student and student['attendance_percentage'] is not None:
-            current_pct = round(float(student['attendance_percentage']), 1)
         else:
             current_pct = round((attended_count / total_conducted) * 100.0, 1)
 
