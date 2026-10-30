@@ -91,6 +91,7 @@
             <th>Program</th>
             <th>Sem</th>
             <th>Section</th>
+            <th>Attendance %</th>
           </tr>
         </thead>
         <tbody>
@@ -102,6 +103,14 @@
             <td>{{ student.program }}</td>
             <td>{{ student.semester }}</td>
             <td>{{ student.section_name }}</td>
+            <td>
+              {% if student.attendance_percentage is not none %}
+                {{ '%.1f'|format(student.attendance_percentage) }}%
+                <span style="color: #64748b; font-size: 0.8rem;">({{ student.classes_attended or 0 }}/{{ student.total_classes or 0 }})</span>
+              {% else %}
+                —
+              {% endif %}
+            </td>
           </tr>
           {% endfor %}
           {% if not students %}

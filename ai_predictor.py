@@ -7,6 +7,21 @@ prescriptive recovery calculations, and automated academic intervention notices.
 from datetime import datetime
 import math
 
+
+def _student_field(student, key, default=None):
+    """Reads a field from sqlite3.Row or dict without throwing on missing columns."""
+    try:
+        if hasattr(student, 'keys') and key in student.keys():
+            value = student[key]
+            return default if value is None else value
+    except Exception:
+        pass
+    if isinstance(student, dict):
+        value = student.get(key, default)
+        return default if value is None else value
+    return default
+
+
 class AIAttendancePredictor:
     """
     Predictive Intelligence engine that calculates student risk scores,
@@ -26,15 +41,36 @@ class AIAttendancePredictor:
         :param attended_session_ids: set of session_ids the student attended
         :return: comprehensive metrics dictionary
         """
-        total_sessions = len(session_records)
-        attended_count = len(attended_session_ids)
-        
+        qr_sessions = len(session_records)
+        qr_attended = len(attended_session_ids)
+
+        academic_total = _student_field(student, 'total_classes')
+        academic_attended = _student_field(student, 'classes_attended')
+        try:
+            academic_total = int(academic_total) if academic_total not in (None, '') else 0
+        except (TypeError, ValueError):
+            academic_total = 0
+        try:
+            academic_attended = int(academic_attended) if academic_attended not in (None, '') else 0
+        except (TypeError, ValueError):
+            academic_attended = 0
+
+        # Prefer persisted semester attendance from the dataset; overlay live QR scans.
+        total_sessions = academic_total + qr_sessions
+        attended_count = academic_attended + qr_attended
+
         # 1. Current Attendance Rate
+        stored_pct = _student_field(student, 'attendance_percentage')
         if total_sessions == 0:
             current_pct = 100.0
             attended_count = 0
         else:
             current_pct = round((attended_count / total_sessions) * 100, 1)
+            if academic_total and not qr_sessions and stored_pct not in (None, ''):
+                try:
+                    current_pct = round(float(stored_pct), 1)
+                except (TypeError, ValueError):
+                    pass
 
         # 2. Chronological sequence of presence (1 = present, 0 = absent)
         presence_sequence = []
@@ -170,13 +206,16 @@ class AIAttendancePredictor:
         most_missed_day = sorted_days[0][0] if sorted_days and sorted_days[0][1] > 0 else "None"
 
         return {
-            'student_id': student['id'] if 'id' in student.keys() else None,
-            'roll_number': student['roll_number'],
-            'full_name': student['full_name'],
-            'email': student['email'],
-            'department': student['dept_name'] if 'dept_name' in student.keys() else (student.get('department') or 'General'),
-            'section': student['section_name'] if 'section_name' in student.keys() else (student.get('section') or 'Default'),
-            'semester': student['semester'] if 'semester' in student.keys() else 1,
+            'student_id': _student_field(student, 'id'),
+            'roll_number': _student_field(student, 'roll_number'),
+            'full_name': _student_field(student, 'full_name'),
+            'email': _student_field(student, 'email'),
+            'department': _student_field(student, 'dept_name') or _student_field(student, 'department') or 'General',
+            'section': _student_field(student, 'section_name') or _student_field(student, 'section') or 'Default',
+            'semester': _student_field(student, 'semester', 1),
+            'ml_predicted_status': _student_field(student, 'predicted_status'),
+            'ml_predicted_risk_tier': _student_field(student, 'predicted_risk_tier'),
+            'ml_prescriptive_action_plan': _student_field(student, 'prescriptive_action_plan'),
             'total_sessions': total_sessions,
             'attended_count': attended_count,
             'missed_count': total_sessions - attended_count,
@@ -222,6 +261,11 @@ class AIAttendancePredictor:
             sessions = conn.execute(sessions_query).fetchall()
 
         session_list = [{'id': s['id'], 'created_at': s['created_at']} for s in sessions]
+        # Ignore leftover / empty QR sessions so they do not zero-out semester attendance.
+        sessions_with_scans = {
+            r['session_id'] for r in conn.execute("SELECT DISTINCT session_id FROM attendance").fetchall()
+        }
+        session_list = [s for s in session_list if s['id'] in sessions_with_scans]
         session_id_set = {s['id'] for s in session_list}
 
         # Fetch students query
@@ -368,7 +412,11 @@ class AIAttendancePredictor:
             sessions = conn.execute("SELECT id, created_at FROM sessions ORDER BY created_at ASC").fetchall()
 
         session_list = [{'id': s['id'], 'created_at': s['created_at']} for s in sessions]
-        
+        sessions_with_scans = {
+            r['session_id'] for r in conn.execute("SELECT DISTINCT session_id FROM attendance").fetchall()
+        }
+        session_list = [s for s in session_list if s['id'] in sessions_with_scans]
+
         att_rows = conn.execute("SELECT session_id FROM attendance WHERE student_id = ?", (roll_number,)).fetchall()
         attended_sessions = {r['session_id'] for r in att_rows}
 

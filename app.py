@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, make_response, send_file
+from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, make_response, send_file, send_from_directory
 from models import get_db_connection, init_db
 from qr_handler import generate_qr_base64
 from datetime import datetime, date, timedelta
@@ -13,14 +13,18 @@ import sqlite3
 import pandas as pd
 import json
 import re
+import math
 from functools import wraps
 from io import StringIO, BytesIO
+from face_verifier import FaceVerifier
+from email_service import EmailReportService
 from ai_predictor import AIAttendancePredictor
 from leave_manager import (
     LeaveCalculator, LeaveWorkflowManager, SystemSettingsManager,
     NotificationManager, AuditLogger
 )
 from leave_ai_service import AILeaveExtractor, AILeaveAssistant, AIDocumentOCR
+from data_handler import normalize_student_columns, ensure_department_course_section, sync_dataset_to_sqlite
 
 app = Flask(__name__)
 # Move SECRET_KEY to environment variable with a fallback
@@ -37,8 +41,12 @@ ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'webp'}
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# Ensure database is initialized
+# Ensure database is initialized and the project dataset is loaded into SQLite
 init_db()
+try:
+    sync_dataset_to_sqlite(os.path.join(BASE_DIR, 'attendance.db'), base_dir=BASE_DIR)
+except Exception as dataset_sync_error:
+    print(f"Dataset sync warning: {dataset_sync_error}")
 
 # --- Global Context Processor for Notifications & Roles ---
 @app.context_processor
@@ -122,16 +130,12 @@ def process_student_import(file, mode, update_existing, admin_id):
     except Exception as e:
         return 0, 0, [f"File read error: {str(e)}"], None
 
-    required_cols = ['roll_number', 'full_name', 'email', 'department', 'program', 'semester', 'section']
+    df = normalize_student_columns(df)
+
+    required_cols = ['roll_number', 'full_name', 'department', 'semester']
     missing_cols = [col for col in required_cols if col not in df.columns]
     if missing_cols:
         return 0, 0, [f"Missing columns: {', '.join(missing_cols)}"], None
-
-    # Pre-fetch valid departments and sections for validation
-    conn = get_db_connection()
-    depts = {row['name']: row['id'] for row in conn.execute('SELECT id, name FROM departments').fetchall()}
-    sects = {row['section_name']: row['id'] for row in conn.execute('SELECT id, section_name FROM sections').fetchall()}
-    conn.close()
 
     valid_records = []
     errors = []
@@ -151,10 +155,14 @@ def process_student_import(file, mode, update_existing, admin_id):
         roll = str(row.get('roll_number', '')).strip()
         name = str(row.get('full_name', '')).strip()
         email = str(row.get('email', '')).strip()
+        if not email or email.lower() in ('nan', 'none'):
+            email = f"{roll.lower().replace(' ', '.')}@university.edu"
         dept_name = str(row.get('department', '')).strip()
-        prog = str(row.get('program', '')).strip()
+        prog = str(row.get('program', '') or dept_name).strip()
         sem = row.get('semester')
-        sect_name = str(row.get('section', '')).strip()
+        sect_name = str(row.get('section', '') or 'A').strip()
+        if sect_name.lower() in ('nan', 'none', ''):
+            sect_name = 'A'
 
         # Roll number uniqueness in file
         if roll in seen_roll_numbers:
@@ -173,14 +181,17 @@ def process_student_import(file, mode, update_existing, admin_id):
         except (ValueError, TypeError):
             row_errors.append(f"Invalid semester value: {sem}")
 
-        # Department and Section existence
-        dept_id = depts.get(dept_name)
-        if not dept_id:
-            row_errors.append(f"Department '{dept_name}' does not exist")
-
-        sect_id = sects.get(sect_name)
-        if not sect_id:
-            row_errors.append(f"Section '{sect_name}' does not exist")
+        # Create missing departments / sections from the import file instead of rejecting every row
+        dept_id = None
+        sect_id = None
+        if dept_name:
+            try:
+                org_conn = get_db_connection()
+                dept_id, _, sect_id = ensure_department_course_section(org_conn, dept_name, sect_name)
+                org_conn.commit()
+                org_conn.close()
+            except Exception as org_err:
+                row_errors.append(f"Could not resolve department/section: {org_err}")
 
         if row_errors:
             errors.append({'row': row_num, 'roll': roll, 'reasons': "; ".join(row_errors)})
@@ -192,7 +203,11 @@ def process_student_import(file, mode, update_existing, admin_id):
                 'dept_id': dept_id,
                 'program': prog,
                 'semester': int(sem),
-                'section_id': sect_id
+                'section_id': sect_id,
+                'total_classes': None if 'total_classes' not in row or pd.isna(row.get('total_classes')) else row.get('total_classes'),
+                'classes_attended': None if 'classes_attended' not in row or pd.isna(row.get('classes_attended')) else row.get('classes_attended'),
+                'classes_missed': None if 'classes_missed' not in row or pd.isna(row.get('classes_missed')) else row.get('classes_missed'),
+                'attendance_percentage': None if 'attendance_percentage' not in row or pd.isna(row.get('attendance_percentage')) else row.get('attendance_percentage'),
             })
 
     # Import Logic
@@ -208,16 +223,22 @@ def process_student_import(file, mode, update_existing, admin_id):
             if update_existing:
                 # Update if exists, else insert
                 cursor.execute('''
-                    INSERT INTO students (roll_number, full_name, email, dept_id, program, semester, section_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO students (roll_number, full_name, email, dept_id, program, semester, section_id,
+                        total_classes, classes_attended, classes_missed, attendance_percentage)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(roll_number) DO UPDATE SET
                         full_name=excluded.full_name,
                         email=excluded.email,
                         dept_id=excluded.dept_id,
                         program=excluded.program,
                         semester=excluded.semester,
-                        section_id=excluded.section_id
-                ''', (rec['roll_number'], rec['full_name'], rec['email'], rec['dept_id'], rec['program'], rec['semester'], rec['section_id']))
+                        section_id=excluded.section_id,
+                        total_classes=COALESCE(excluded.total_classes, students.total_classes),
+                        classes_attended=COALESCE(excluded.classes_attended, students.classes_attended),
+                        classes_missed=COALESCE(excluded.classes_missed, students.classes_missed),
+                        attendance_percentage=COALESCE(excluded.attendance_percentage, students.attendance_percentage)
+                ''', (rec['roll_number'], rec['full_name'], rec['email'], rec['dept_id'], rec['program'], rec['semester'], rec['section_id'],
+                      rec.get('total_classes'), rec.get('classes_attended'), rec.get('classes_missed'), rec.get('attendance_percentage')))
             else:
                 # Check if exists first to avoid IntegrityError if not updating
                 existing = conn.execute('SELECT id FROM students WHERE roll_number = ?', (rec['roll_number'],)).fetchone()
@@ -226,9 +247,11 @@ def process_student_import(file, mode, update_existing, admin_id):
                     continue
 
                 cursor.execute('''
-                    INSERT INTO students (roll_number, full_name, email, dept_id, program, semester, section_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                ''', (rec['roll_number'], rec['full_name'], rec['email'], rec['dept_id'], rec['program'], rec['semester'], rec['section_id']))
+                    INSERT INTO students (roll_number, full_name, email, dept_id, program, semester, section_id,
+                        total_classes, classes_attended, classes_missed, attendance_percentage)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (rec['roll_number'], rec['full_name'], rec['email'], rec['dept_id'], rec['program'], rec['semester'], rec['section_id'],
+                      rec.get('total_classes'), rec.get('classes_attended'), rec.get('classes_missed'), rec.get('attendance_percentage')))
 
             success_count += 1
 
@@ -417,7 +440,9 @@ def dashboard():
             LIMIT 10
         ''').fetchall()
         total_sessions = conn.execute('SELECT COUNT(*) as count FROM sessions').fetchone()['count']
-        total_attendance = conn.execute('SELECT COUNT(*) as count FROM attendance').fetchone()['count']
+        qr_attendance = conn.execute('SELECT COUNT(*) as count FROM attendance').fetchone()['count']
+        academic_attendance = conn.execute('SELECT COALESCE(SUM(classes_attended), 0) as count FROM students').fetchone()['count']
+        total_attendance = qr_attendance + academic_attendance
 
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     if role == 'teacher':
@@ -449,21 +474,65 @@ def dashboard():
                            pending_leaves=pending_leaves,
                            now_str=now_str)
 
+# Helper: Haversine GPS Distance Calculation (meters)
+def calculate_haversine_distance(lat1, lon1, lat2, lon2):
+    """Calculates distance between two GPS coordinates in meters."""
+    if lat1 is None or lon1 is None or lat2 is None or lon2 is None:
+        return None
+    try:
+        lat1, lon1, lat2, lon2 = float(lat1), float(lon1), float(lat2), float(lon2)
+        R = 6371000  # Earth radius in meters
+        phi1 = math.radians(lat1)
+        phi2 = math.radians(lat2)
+        delta_phi = math.radians(lat2 - lat1)
+        delta_lambda = math.radians(lon2 - lon1)
+        a = math.sin(delta_phi / 2.0)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2.0)**2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        return round(R * c, 1)
+    except Exception as e:
+        print(f"Haversine calculation error: {e}")
+        return None
+
+@app.route('/uploads/attendance_photos/<path:filename>')
+def serve_attendance_photo(filename):
+    """Serves captured student attendance selfies."""
+    photo_dir = os.path.join(BASE_DIR, 'uploads', 'attendance_photos')
+    return send_from_directory(photo_dir, filename)
+
 @app.route('/start-session', methods=['POST'])
 @role_required('admin', 'teacher')
 def start_session():
-    # Teachers can only start sessions if they are registered (we assume they are logged in)
     token = str(uuid.uuid4())
     now = datetime.now()
     now_str = now.strftime('%Y-%m-%d %H:%M:%S')
     expiry = (now + timedelta(minutes=10)).strftime('%Y-%m-%d %H:%M:%S')
 
+    # Geo-fencing parameters
+    geofence_enabled = 1 if request.form.get('geofence_enabled') in ('1', 'on', 'true') else 0
+    latitude = request.form.get('latitude')
+    longitude = request.form.get('longitude')
+    radius_meters = float(request.form.get('radius_meters') or 100.0)
+    course_id = request.form.get('course_id') or None
+    section_id = request.form.get('section_id') or None
+
+    try:
+        latitude = float(latitude) if latitude and latitude.strip() else None
+        longitude = float(longitude) if longitude and longitude.strip() else None
+    except (ValueError, TypeError):
+        latitude, longitude = None, None
+
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO sessions (teacher_id, created_at, expiry_time, token, status)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (session['user_id'], now_str, expiry, token, 'active'))
+        INSERT INTO sessions (
+            teacher_id, created_at, expiry_time, token, status,
+            geofence_enabled, latitude, longitude, radius_meters, course_id, section_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        session['user_id'], now_str, expiry, token, 'active',
+        geofence_enabled, latitude, longitude, radius_meters, course_id, section_id
+    ))
     session_id = cursor.lastrowid
     conn.commit()
     conn.close()
@@ -482,7 +551,7 @@ def view_session(session_id):
         flash('Session not found.', 'danger')
         return redirect(url_for('dashboard'))
 
-    # OWNERSHIP CHECK: Only admin or the session creator can view this session
+    # Ownership check
     if session['role'] != 'admin' and sess['teacher_id'] != session['user_id']:
         conn.close()
         flash('You do not have permission to view this session.', 'danger')
@@ -497,8 +566,21 @@ def view_session(session_id):
 
     qr_code = generate_qr_base64(scan_url)
 
-    stats = conn.execute('SELECT COUNT(*) as count FROM attendance WHERE session_id = ?', (session_id,)).fetchone()
+    # Fetch present attendees
     attendees = conn.execute('SELECT * FROM attendance WHERE session_id = ? ORDER BY timestamp DESC', (session_id,)).fetchall()
+    present_rolls = {a['student_id'] for a in attendees}
+
+    # Fetch all registered students for absentee tracking
+    if sess['section_id']:
+        all_students = conn.execute('SELECT * FROM students WHERE section_id = ? ORDER BY roll_number ASC', (sess['section_id'],)).fetchall()
+    else:
+        all_students = conn.execute('SELECT * FROM students ORDER BY roll_number ASC').fetchall()
+
+    absentees = [s for s in all_students if s['roll_number'] not in present_rolls]
+    total_enrolled = len(all_students) if all_students else len(attendees)
+    attendance_rate = round((len(attendees) / total_enrolled * 100), 1) if total_enrolled > 0 else 100.0
+
+    teacher = conn.execute('SELECT * FROM users WHERE id = ?', (sess['teacher_id'],)).fetchone()
     conn.close()
 
     expiry_time = datetime.strptime(sess['expiry_time'], '%Y-%m-%d %H:%M:%S')
@@ -508,8 +590,13 @@ def view_session(session_id):
     return render_template('session.html',
                            current_session=sess,
                            qr_code=qr_code,
-                           count=stats['count'],
+                           count=len(attendees),
                            attendees=attendees,
+                           absentees=absentees,
+                           absent_count=len(absentees),
+                           total_enrolled=total_enrolled,
+                           attendance_rate=attendance_rate,
+                           teacher=teacher,
                            scan_url=scan_url,
                            local_scan_url=local_scan_url,
                            is_expired=is_expired,
@@ -517,26 +604,51 @@ def view_session(session_id):
 
 @app.route('/api/session-stats/<int:session_id>')
 def session_stats(session_id):
-    # This is an API endpoint used by JS on the session page, usually the teacher is the one viewing.
-    # In a real system, we'd verify the session here too.
     conn = get_db_connection()
     sess = conn.execute('SELECT * FROM sessions WHERE id = ?', (session_id,)).fetchone()
     if not sess:
         conn.close()
         return jsonify({'error': 'Session not found'}), 404
 
-    attendees_rows = conn.execute('SELECT student_id, timestamp FROM attendance WHERE session_id = ? ORDER BY timestamp DESC', (session_id,)).fetchall()
+    attendees_rows = conn.execute('SELECT * FROM attendance WHERE session_id = ? ORDER BY timestamp DESC', (session_id,)).fetchall()
+    
+    # Absentee metrics
+    if sess['section_id']:
+        all_students = conn.execute('SELECT * FROM students WHERE section_id = ?', (sess['section_id'],)).fetchall()
+    else:
+        all_students = conn.execute('SELECT * FROM students', ()).fetchall()
+
+    present_rolls = {row['student_id'] for row in attendees_rows}
+    absentees_rows = [s for s in all_students if s['roll_number'] not in present_rolls]
+    total_enrolled = len(all_students) if all_students else len(attendees_rows)
+    attendance_rate = round((len(attendees_rows) / total_enrolled * 100), 1) if total_enrolled > 0 else 100.0
     conn.close()
 
     expiry_time = datetime.strptime(sess['expiry_time'], '%Y-%m-%d %H:%M:%S')
     is_expired = datetime.now() > expiry_time
     remaining_seconds = max(0, int((expiry_time - datetime.now()).total_seconds()))
 
-    attendees = [{'student_id': row['student_id'], 'timestamp': row['timestamp']} for row in attendees_rows]
+    attendees = [{
+        'student_id': row['student_id'],
+        'timestamp': row['timestamp'],
+        'photo_path': row['photo_path'],
+        'face_verified': row['face_verified'],
+        'distance_meters': row['distance_meters']
+    } for row in attendees_rows]
+
+    absentees = [{
+        'roll_number': s['roll_number'],
+        'full_name': s['full_name'],
+        'email': s['email']
+    } for s in absentees_rows]
 
     return jsonify({
         'count': len(attendees),
+        'absent_count': len(absentees),
+        'attendance_rate': attendance_rate,
+        'total_enrolled': total_enrolled,
         'students': attendees,
+        'absentees': absentees,
         'is_expired': is_expired,
         'remaining_seconds': remaining_seconds
     })
@@ -561,24 +673,68 @@ def mark_attendance(token):
         return render_template('feedback.html', status='error', message='Device limit reached: Attendance has already been recorded from this device for this session.')
 
     if request.method == 'POST':
-        student_id = request.form.get('student_name', '').strip() # Using existing field name for compatibility
+        student_id = request.form.get('student_name', '').strip()
 
         if not student_id:
             conn.close()
             return render_template('feedback.html', status='error', message='Student Name / Roll No cannot be blank!')
 
+        # 1. Geo-Fencing Verification
+        student_lat = request.form.get('latitude')
+        student_lon = request.form.get('longitude')
+        distance_meters = None
+
+        if sess['geofence_enabled'] and sess['latitude'] is not None and sess['longitude'] is not None:
+            if not student_lat or not student_lon:
+                conn.close()
+                return render_template('feedback.html', status='error',
+                                       message='Location verification required: Geo-Fencing is enabled for this session. Please enable GPS location services on your device to mark attendance.')
+
+            distance_meters = calculate_haversine_distance(sess['latitude'], sess['longitude'], student_lat, student_lon)
+            allowed_radius = float(sess['radius_meters'] or 100.0)
+
+            if distance_meters is None or distance_meters > allowed_radius:
+                conn.close()
+                dist_display = f"{int(distance_meters)}m" if distance_meters is not None else "Unknown"
+                return render_template('feedback.html', status='error',
+                                       message=f'Geo-Fencing Check Failed: You are {dist_display} away from the classroom (Allowed limit: {int(allowed_radius)}m). Attendance denied.')
+
+        # 2. Face Photo Verification & Capture
+        photo_data = request.form.get('photo_data', '').strip()
+        photo_result = FaceVerifier.process_and_save_photo(photo_data, sess['id'], student_id)
+        photo_path = photo_result['photo_url'] if photo_result['success'] else None
+        face_verified = 1 if photo_result.get('face_detected', True) else 0
+
         now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         try:
-            conn.execute('INSERT INTO attendance (session_id, student_id, timestamp) VALUES (?, ?, ?)',
-                         (sess['id'], student_id, now_str))
+            conn.execute('''
+                INSERT INTO attendance (
+                    session_id, student_id, timestamp, photo_path, face_verified,
+                    latitude, longitude, distance_meters
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                sess['id'], student_id, now_str, photo_path, face_verified,
+                float(student_lat) if student_lat else None,
+                float(student_lon) if student_lon else None,
+                distance_meters
+            ))
             conn.commit()
             conn.close()
+
+            verification_note = ""
+            if photo_result.get('face_detected'):
+                verification_note += " &bull; 📸 Face Verified"
+            if distance_meters is not None:
+                verification_note += f" &bull; 📍 Location Verified ({int(distance_meters)}m)"
 
             resp = make_response(render_template('feedback.html',
                                                  status='success',
                                                  message=f'Attendance successfully recorded for {student_id}!',
                                                  student_name=student_id,
-                                                 timestamp=now_str))
+                                                 timestamp=now_str,
+                                                 photo_url=photo_path,
+                                                 extra_info=verification_note))
             resp.set_cookie(cookie_name, student_id, max_age=86400, httponly=True)
             return resp
 
@@ -599,6 +755,94 @@ def mark_attendance(token):
     conn.close()
     return render_template('student_form.html', token=token, current_session=sess)
 
+@app.route('/send-email-report/<int:session_id>', methods=['POST', 'GET'])
+@role_required('admin', 'teacher')
+def send_email_report(session_id):
+    """Generates and sends automated email report to teacher."""
+    conn = get_db_connection()
+    sess = conn.execute('SELECT * FROM sessions WHERE id = ?', (session_id,)).fetchone()
+    if not sess:
+        conn.close()
+        flash('Session not found.', 'danger')
+        return redirect(url_for('reports'))
+
+    teacher = conn.execute('SELECT * FROM users WHERE id = ?', (sess['teacher_id'],)).fetchone()
+    teacher_email = teacher['email'] if teacher and teacher['email'] else session.get('email', 'admin@university.edu')
+
+    attendees = conn.execute('SELECT * FROM attendance WHERE session_id = ? ORDER BY timestamp ASC', (session_id,)).fetchall()
+
+    if sess['section_id']:
+        all_students = conn.execute('SELECT * FROM students WHERE section_id = ?', (sess['section_id'],)).fetchall()
+    else:
+        all_students = conn.execute('SELECT * FROM students', ()).fetchall()
+
+    present_ids = {a['student_id'] for a in attendees}
+    absentees = [s for s in all_students if s['roll_number'] not in present_ids]
+
+    # Generate CSV payload
+    si = StringIO()
+    cw = csv.writer(si)
+    cw.writerow(['Index', 'Roll / Student ID', 'Status', 'Timestamp', 'GPS Distance (m)', 'Face Verified'])
+    for idx, a in enumerate(attendees, 1):
+        cw.writerow([idx, a['student_id'], 'PRESENT', a['timestamp'], a['distance_meters'] or 'Verified', 'YES' if a['face_verified'] else 'NO'])
+    for idx, ab in enumerate(absentees, len(attendees) + 1):
+        cw.writerow([idx, ab['roll_number'], 'ABSENT', '—', '—', '—'])
+    csv_content = si.getvalue()
+    conn.close()
+
+    success, msg = EmailReportService.send_attendance_report(
+        recipient_email=teacher_email,
+        session_data=dict(sess),
+        attendees=[dict(a) for a in attendees],
+        absentees=[dict(ab) for ab in absentees],
+        csv_content=csv_content
+    )
+    flash(msg, 'success' if success else 'info')
+    return redirect(url_for('view_session', session_id=session_id))
+
+@app.route('/export-full-roster/<int:session_id>')
+@role_required('admin', 'teacher')
+def export_full_roster(session_id):
+    """Exports a unified CSV spreadsheet with both Present and Absent student records."""
+    conn = get_db_connection()
+    sess = conn.execute('SELECT * FROM sessions WHERE id = ?', (session_id,)).fetchone()
+    if not sess:
+        conn.close()
+        flash('Session not found.', 'danger')
+        return redirect(url_for('reports'))
+
+    attendees = conn.execute('SELECT * FROM attendance WHERE session_id = ? ORDER BY timestamp ASC', (session_id,)).fetchall()
+    
+    if sess['section_id']:
+        all_students = conn.execute('SELECT * FROM students WHERE section_id = ? ORDER BY roll_number ASC', (sess['section_id'],)).fetchall()
+    else:
+        all_students = conn.execute('SELECT * FROM students ORDER BY roll_number ASC').fetchall()
+    conn.close()
+
+    present_map = {a['student_id']: a for a in attendees}
+
+    si = StringIO()
+    cw = csv.writer(si)
+    cw.writerow(['Roll Number', 'Student Name', 'Status', 'Recorded Timestamp', 'GPS Distance (m)', 'Face Verified', 'Session ID'])
+
+    for st in all_students:
+        if st['roll_number'] in present_map:
+            att = present_map[st['roll_number']]
+            cw.writerow([st['roll_number'], st['full_name'], 'PRESENT', att['timestamp'], att['distance_meters'] or 'Verified', 'YES' if att['face_verified'] else 'NO', session_id])
+        else:
+            cw.writerow([st['roll_number'], st['full_name'], 'ABSENT', '—', '—', '—', session_id])
+
+    # Also list any unregistered/guest attendees
+    registered_rolls = {st['roll_number'] for st in all_students}
+    for a in attendees:
+        if a['student_id'] not in registered_rolls:
+            cw.writerow([a['student_id'], a['student_id'], 'PRESENT (Guest/Walk-in)', a['timestamp'], a['distance_meters'] or 'N/A', 'YES' if a['face_verified'] else 'NO', session_id])
+
+    output = make_response(si.getvalue())
+    output.headers["Content-Disposition"] = f"attachment; filename=attendance_roster_session_{session_id}_{datetime.now().strftime('%Y%m%d')}.csv"
+    output.headers["Content-type"] = "text/csv; charset=utf-8"
+    return output
+
 @app.route('/reports')
 @role_required('admin', 'teacher')
 def reports():
@@ -616,7 +860,7 @@ def reports():
 
     for sess in sessions_db:
         attendees = conn.execute('''
-            SELECT id, student_id, timestamp
+            SELECT id, student_id, timestamp, photo_path, face_verified, distance_meters
             FROM attendance
             WHERE session_id = ?
             ORDER BY timestamp ASC
@@ -631,9 +875,21 @@ def reports():
             'students': attendees,
             'count': len(attendees)
         })
+
+    semester_total = conn.execute('SELECT COUNT(*) as count FROM students').fetchone()['count']
+    semester_records = conn.execute('''
+        SELECT s.roll_number, s.full_name, s.program, s.semester,
+               s.total_classes, s.classes_attended, s.classes_missed,
+               s.attendance_percentage, s.predicted_status, s.predicted_risk_tier,
+               d.name as dept_name
+        FROM students s
+        LEFT JOIN departments d ON s.dept_id = d.id
+        ORDER BY COALESCE(s.attendance_percentage, 100) ASC, s.roll_number ASC
+        LIMIT 100
+    ''').fetchall()
     conn.close()
 
-    return render_template('reports.html', reports=report_data, total_scans=total_scans, total_sessions=len(report_data))
+    return render_template('reports.html', reports=report_data, total_scans=total_scans, total_sessions=len(report_data), semester_records=semester_records, semester_total=semester_total)
 
 @app.route('/export/<int:session_id>')
 @role_required('admin', 'teacher')
@@ -1058,7 +1314,7 @@ def manage_students():
     conn = get_db_connection()
 
     # Build query for students
-    query = "SELECT s.*, d.name as dept_name, sec.section_name FROM students s JOIN departments d ON s.dept_id = d.id JOIN sections sec ON s.section_id = sec.id"
+    query = "SELECT s.*, d.name as dept_name, sec.section_name FROM students s LEFT JOIN departments d ON s.dept_id = d.id LEFT JOIN sections sec ON s.section_id = sec.id"
     params = []
     where_clauses = []
 
@@ -1076,7 +1332,7 @@ def manage_students():
         query += " WHERE " + " AND ".join(where_clauses)
 
     # Get total count for pagination
-    count_query = f"SELECT COUNT(*) as count FROM students s JOIN departments d ON s.dept_id = d.id JOIN sections sec ON s.section_id = sec.id"
+    count_query = f"SELECT COUNT(*) as count FROM students s LEFT JOIN departments d ON s.dept_id = d.id LEFT JOIN sections sec ON s.section_id = sec.id"
     if where_clauses:
         count_query += " WHERE " + " AND ".join(where_clauses)
     total_students = conn.execute(count_query, params).fetchone()['count']
