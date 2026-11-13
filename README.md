@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-# QR Code Generator
-=======
 # 📱 QR-Based Attendance System
 
 A modern, full-stack automated attendance tracking application built with **Flask**, **SQLite**, dynamic **QR Code generation**, and a **Glassmorphic UI**.
@@ -75,4 +72,3 @@ Open [http://127.0.0.1:5001](http://127.0.0.1:5001) in your browser.
 
 ## 📄 License
 This project is licensed under the MIT License.
->>>>>>> fc28f80 (Add secure attendance foundation and bulk student import)
